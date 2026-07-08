@@ -1,0 +1,19 @@
+{
+  "name": "ticketbay",
+  "version": "1.0.0",
+  "description": "TicketBay — demo booking platform for the AI testing-agents video",
+  "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "test:mutation": "stryker run",
+    "test:integration": "vitest run tests/integration",
+    "test:ui": "playwright test"
+  },
+  "devDependencies": {
+    "@stryker-mutator/core": "^8.7.1",
+    "@stryker-mutator/vitest-runner": "^8.7.1",
+    "fast-check": "^3.23.1",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}
