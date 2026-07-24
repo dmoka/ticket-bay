@@ -23,8 +23,11 @@ export function calculateRefund(order: Order, cancelled: number, nowMs: number):
   if (!Number.isInteger(order.tickets) || order.tickets <= 0) {
     throw new RangeError("order must have at least one ticket");
   }
-  if (order.discountPercent < 0 || order.discountPercent > 100) {
+  if (!(order.discountPercent >= 0 && order.discountPercent <= 100)) {
     throw new RangeError("discount out of range");
+  }
+  if (!Number.isInteger(order.totalCents) || order.totalCents < 0) {
+    throw new RangeError("order total out of range");
   }
   if (nowMs >= order.eventStartMs) {
     return 0;
@@ -34,8 +37,10 @@ export function calculateRefund(order: Order, cancelled: number, nowMs: number):
 
 /** Fee kept by the platform on every refund, in cents. Min 50, 2% of refund. */
 export function refundFee(refundCents: number): number {
+  if (refundCents <= 0) return 0;
   const fee = Math.round(refundCents * 0.02);
-  return fee >= 50 ? fee : 50;
+  const floored = fee >= 50 ? fee : 50;
+  return floored > refundCents ? refundCents : floored;
 }
 
 /** Net amount returned to the customer. Never negative. */
