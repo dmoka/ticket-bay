@@ -19,6 +19,16 @@ describe("calculateRefund", () => {
     expect(calculateRefund(order, 0)).toBe(0);
   });
 
+  it("throws for an order with zero tickets", () => {
+    const order = { totalCents: 0, tickets: 0, discountPercent: 0 };
+    expect(() => calculateRefund(order, 0)).toThrow();
+  });
+
+  it("throws for an invalid discount", () => {
+    const order = { totalCents: 10000, tickets: 4, discountPercent: 150 };
+    expect(() => calculateRefund(order, 2)).toThrow();
+  });
+
   it("throws when cancelling more tickets than the order has", () => {
     const order = { totalCents: 10000, tickets: 4, discountPercent: 0 };
     expect(() => calculateRefund(order, 5)).toThrow();
