@@ -18,15 +18,17 @@ The five run as **Claude Code subagents** in a multi-critic loop — one coder, 
 
 ## See it catch a real bug
 
-The repo ships with an AI-written refund module and an AI-written test suite. Six tests. All green.
+The repo ships with an AI-written refund module and an AI-written test suite — all green. The branch `demo/loop-recording` carries a planted defect: the docstring promises *"cancellations are only allowed before the event starts"*, and the code never checks the clock. Cancel after the show → full refund. Every test stays green (none of them touches a date).
 
 ```bash
+git checkout demo/loop-recording
 npm install
-npm test              # 6/6 passing. Looks done, right?
-npm run test:mutation # mutation score ~68%. 10 surviving mutants.
+npm test              # all green. Looks done, right?
 ```
 
-Open `reports/mutation/mutation.html` and look at `src/refund.ts` line 21: Stryker flips the discount math from multiply to divide — **the bigger the discount, the bigger the refund** — and every single test stays green. That's the bug class your green suite can't see, and the exact thing this team exists to catch.
+Then run the loop (see `CLAUDE.md`): the adversarial tester reads the docstring against the code, writes the cancel-after-showtime test nobody wrote, and goes red. The coder fixes the code — it can't touch the tests — and round two is green.
+
+Mutation testing tells the same story on `main`: run `npm run test:mutation` and check `reports/mutation/mutation.html` — the time-gate boundary mutant (`>=` flipped to `>`) survives: a refund exactly at showtime slips through, and no test notices.
 
 ## Steal it
 
