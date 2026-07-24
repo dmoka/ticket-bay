@@ -1,37 +1,41 @@
-// Test suite as an AI agent typically writes it: green, plausible, shallow.
-// Round numbers only, no boundaries, no rounding checks. Every test passes.
+// AI-style suite: plausible, green, round numbers, happy paths.
 import { describe, it, expect } from "vitest";
 import { calculateRefund, netRefund, refundFee } from "../src/refund";
 
+const FUTURE = 2000000000000; // event far in the future
+const NOW = 1700000000000;
+
+const order = (over = {}) => ({
+  totalCents: 10000, tickets: 4, discountPercent: 0, eventStartMs: FUTURE, ...over,
+});
+
 describe("calculateRefund", () => {
   it("refunds the full amount when all tickets are cancelled", () => {
-    const order = { totalCents: 10000, tickets: 4, discountPercent: 0 };
-    expect(calculateRefund(order, 4)).toBe(10000);
+    expect(calculateRefund(order(), 4, NOW)).toBe(10000);
   });
 
   it("refunds half when half the tickets are cancelled", () => {
-    const order = { totalCents: 10000, tickets: 4, discountPercent: 0 };
-    expect(calculateRefund(order, 2)).toBe(5000);
+    expect(calculateRefund(order(), 2, NOW)).toBe(5000);
   });
 
   it("returns 0 when nothing is cancelled", () => {
-    const order = { totalCents: 10000, tickets: 4, discountPercent: 0 };
-    expect(calculateRefund(order, 0)).toBe(0);
+    expect(calculateRefund(order(), 0, NOW)).toBe(0);
+  });
+
+  it("returns 0 after the event started", () => {
+    expect(calculateRefund(order({ eventStartMs: NOW - 1 }), 4, NOW)).toBe(0);
   });
 
   it("throws for an order with zero tickets", () => {
-    const order = { totalCents: 0, tickets: 0, discountPercent: 0 };
-    expect(() => calculateRefund(order, 0)).toThrow();
+    expect(() => calculateRefund(order({ tickets: 0 }), 0, NOW)).toThrow();
   });
 
   it("throws for an invalid discount", () => {
-    const order = { totalCents: 10000, tickets: 4, discountPercent: 150 };
-    expect(() => calculateRefund(order, 2)).toThrow();
+    expect(() => calculateRefund(order({ discountPercent: 150 }), 2, NOW)).toThrow();
   });
 
   it("throws when cancelling more tickets than the order has", () => {
-    const order = { totalCents: 10000, tickets: 4, discountPercent: 0 };
-    expect(() => calculateRefund(order, 5)).toThrow();
+    expect(() => calculateRefund(order(), 5, NOW)).toThrow();
   });
 });
 
@@ -43,7 +47,6 @@ describe("refundFee", () => {
 
 describe("netRefund", () => {
   it("subtracts the fee from the refund", () => {
-    const order = { totalCents: 10000, tickets: 4, discountPercent: 0 };
-    expect(netRefund(order, 4)).toBe(9800);
+    expect(netRefund(order(), 4, NOW)).toBe(9800);
   });
 });

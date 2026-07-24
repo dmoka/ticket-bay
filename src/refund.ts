@@ -1,18 +1,22 @@
 export interface Order {
-  /** total paid, in cents */
+  /** total actually paid, in cents */
   totalCents: number;
   /** number of tickets in the order */
   tickets: number;
-  /** percentage discount applied at purchase, 0-100 */
+  /** percentage discount applied at purchase, 0-100 (informational) */
   discountPercent: number;
+  /** when the event starts, ms since epoch — refunds close at this moment */
+  eventStartMs: number;
 }
 
 /**
- * Refund for cancelling `cancelled` tickets from an order.
- * Refund is proportional to the tickets cancelled, minus the discount
- * that was applied at purchase. Result is rounded to whole cents.
+ * Refund for cancelling `cancelled` tickets, proportional to the amount
+ * actually paid, rounded to the nearest cent.
+ *
+ * Business rule: cancellations are only allowed BEFORE the event starts.
+ * From `eventStartMs` on, the refund is zero.
  */
-export function calculateRefund(order: Order, cancelled: number): number {
+export function calculateRefund(order: Order, cancelled: number, nowMs: number): number {
   if (!Number.isInteger(cancelled) || cancelled < 0 || cancelled > order.tickets) {
     throw new RangeError("cancelled tickets out of range");
   }
@@ -22,10 +26,10 @@ export function calculateRefund(order: Order, cancelled: number): number {
   if (order.discountPercent < 0 || order.discountPercent > 100) {
     throw new RangeError("discount out of range");
   }
-  const perTicket = order.totalCents / order.tickets;
-  const gross = perTicket * cancelled;
-  const discounted = gross * (1 - order.discountPercent / 100);
-  return Math.round(discounted);
+  if (nowMs >= order.eventStartMs) {
+    return 0;
+  }
+  return Math.round((order.totalCents * cancelled) / order.tickets);
 }
 
 /** Fee kept by the platform on every refund, in cents. Min 50, 2% of refund. */
@@ -35,8 +39,8 @@ export function refundFee(refundCents: number): number {
 }
 
 /** Net amount returned to the customer. Never negative. */
-export function netRefund(order: Order, cancelled: number): number {
-  const refund = calculateRefund(order, cancelled);
+export function netRefund(order: Order, cancelled: number, nowMs: number): number {
+  const refund = calculateRefund(order, cancelled, nowMs);
   if (refund === 0) return 0;
   const net = refund - refundFee(refund);
   return net > 0 ? net : 0;

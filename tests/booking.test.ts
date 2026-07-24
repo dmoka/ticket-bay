@@ -2,7 +2,7 @@
 import { describe, it, expect } from "vitest";
 import { seatsAvailable, bookTickets, groupDiscount } from "../src/booking";
 
-const ev = () => ({ id: "e1", name: "RockFest", totalSeats: 100, seatsSold: 40, priceCents: 5000 });
+const ev = () => ({ id: "e1", name: "RockFest", totalSeats: 100, seatsSold: 40, priceCents: 5000, startMs: 2000000000000 });
 
 describe("seatsAvailable", () => {
   it("returns remaining seats", () => {

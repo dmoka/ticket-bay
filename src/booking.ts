@@ -6,6 +6,8 @@ export interface Event {
   totalSeats: number;
   seatsSold: number;
   priceCents: number;
+  /** when the event starts, ms since epoch */
+  startMs: number;
 }
 
 export function seatsAvailable(ev: Event): number {
@@ -19,7 +21,7 @@ export function bookTickets(ev: Event, n: number, discountPercent = 0): Order {
   if (n > seatsAvailable(ev)) throw new RangeError("not enough seats");
   const gross = ev.priceCents * n;
   const total = Math.round(gross * (1 - discountPercent / 100));
-  return { totalCents: total, tickets: n, discountPercent };
+  return { totalCents: total, tickets: n, discountPercent, eventStartMs: ev.startMs };
 }
 
 /** Group discount tiers: 5+ tickets 5%, 10+ tickets 10%. */
