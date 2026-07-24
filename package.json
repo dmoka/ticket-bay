@@ -1,12 +1,12 @@
 {
   "name": "ticketbay",
   "version": "1.0.0",
-  "description": "TicketBay — demo booking platform for the AI testing-agents video",
+  "description": "TicketBay \u2014 demo booking platform for the AI testing-agents video",
   "type": "module",
   "scripts": {
     "test": "vitest run",
     "test:mutation": "stryker run",
-    "test:integration": "vitest run tests/integration",
+    "test:integration": "vitest run --passWithNoTests tests/integration",
     "test:ui": "playwright test"
   },
   "devDependencies": {

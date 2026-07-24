@@ -13,8 +13,14 @@ export interface Order {
  * that was applied at purchase. Result is rounded to whole cents.
  */
 export function calculateRefund(order: Order, cancelled: number): number {
-  if (cancelled < 0 || cancelled > order.tickets) {
+  if (!Number.isInteger(cancelled) || cancelled < 0 || cancelled > order.tickets) {
     throw new RangeError("cancelled tickets out of range");
+  }
+  if (!Number.isInteger(order.tickets) || order.tickets <= 0) {
+    throw new RangeError("order must have at least one ticket");
+  }
+  if (order.discountPercent < 0 || order.discountPercent > 100) {
+    throw new RangeError("discount out of range");
   }
   const perTicket = order.totalCents / order.tickets;
   const gross = perTicket * cancelled;
