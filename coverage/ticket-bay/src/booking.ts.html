@@ -3,15 +3,15 @@
 <html lang="en">
 
 <head>
-    <title>Code coverage report for booking.ts</title>
+    <title>Code coverage report for ticket-bay/src/booking.ts</title>
     <meta charset="utf-8" />
-    <link rel="stylesheet" href="prettify.css" />
-    <link rel="stylesheet" href="base.css" />
-    <link rel="shortcut icon" type="image/x-icon" href="favicon.png" />
+    <link rel="stylesheet" href="../../prettify.css" />
+    <link rel="stylesheet" href="../../base.css" />
+    <link rel="shortcut icon" type="image/x-icon" href="../../favicon.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <style type='text/css'>
         .coverage-summary .sorter {
-            background-image: url(sort-arrow-sprite.png);
+            background-image: url(../../sort-arrow-sprite.png);
         }
     </style>
 </head>
@@ -19,34 +19,34 @@
 <body>
 <div class='wrapper'>
     <div class='pad1'>
-        <h1><a href="index.html">All files</a> booking.ts</h1>
+        <h1><a href="../../index.html">All files</a> / <a href="index.html">ticket-bay/src</a> booking.ts</h1>
         <div class='clearfix'>
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">100% </span>
+                <span class="strong">0% </span>
                 <span class="quiet">Statements</span>
-                <span class='fraction'>16/16</span>
+                <span class='fraction'>0/16</span>
             </div>
         
             
             <div class='fl pad1y space-right2'>
                 <span class="strong">100% </span>
                 <span class="quiet">Branches</span>
-                <span class='fraction'>12/12</span>
+                <span class='fraction'>1/1</span>
             </div>
         
             
             <div class='fl pad1y space-right2'>
                 <span class="strong">100% </span>
                 <span class="quiet">Functions</span>
-                <span class='fraction'>3/3</span>
+                <span class='fraction'>1/1</span>
             </div>
         
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">100% </span>
+                <span class="strong">0% </span>
                 <span class="quiet">Lines</span>
-                <span class='fraction'>16/16</span>
+                <span class='fraction'>0/16</span>
             </div>
         
             
@@ -61,7 +61,7 @@
             </div>
         </template>
     </div>
-    <div class='status-line high'></div>
+    <div class='status-line low'></div>
     <pre><table class="coverage">
 <tr><td class="line-count quiet"><a name='L1'></a><a href='#L1'>1</a>
 <a name='L2'></a><a href='#L2'>2</a>
@@ -107,26 +107,26 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">1x</span>
-<span class="cline-any cline-yes">5x</span>
-<span class="cline-any cline-yes">5x</span>
-<span class="cline-any cline-yes">5x</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">1x</span>
-<span class="cline-any cline-yes">4x</span>
-<span class="cline-any cline-yes">4x</span>
-<span class="cline-any cline-yes">2x</span>
-<span class="cline-any cline-yes">2x</span>
-<span class="cline-any cline-yes">2x</span>
-<span class="cline-any cline-yes">2x</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">1x</span>
-<span class="cline-any cline-yes">3x</span>
-<span class="cline-any cline-yes">3x</span>
-<span class="cline-any cline-yes">1x</span>
-<span class="cline-any cline-yes">1x</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-no">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span></td><td class="text"><pre class="prettyprint lang-js">import { Order } from "./refund";
 &nbsp;
 export interface Event {
@@ -139,26 +139,26 @@ export interface Event {
   startMs: number;
 }
 &nbsp;
-export function seatsAvailable(ev: Event): number {
-  const left = ev.totalSeats - ev.seatsSold;
-  return left &gt; 0 ? left : 0;
-}
+<span class="cstat-no" title="statement not covered" >export function seatsAvailable(ev: Event): number {</span>
+<span class="cstat-no" title="statement not covered" >  const left = ev.totalSeats - ev.seatsSold;</span>
+<span class="cstat-no" title="statement not covered" >  return left &gt; 0 ? left : 0;</span>
+<span class="cstat-no" title="statement not covered" >}</span>
 &nbsp;
 /** Book n tickets; returns the new order. Throws when not enough seats. */
-export function bookTickets(ev: Event, n: number, discountPercent = 0): Order {
-  if (n &lt;= 0) throw new RangeError("must book at least one ticket");
-  if (n &gt; seatsAvailable(ev)) throw new RangeError("not enough seats");
-  const gross = ev.priceCents * n;
-  const total = Math.round(gross * (1 - discountPercent / 100));
-  return { totalCents: total, tickets: n, discountPercent, eventStartMs: ev.startMs };
-}
+<span class="cstat-no" title="statement not covered" >export function bookTickets(ev: Event, n: number, discountPercent = 0): Order {</span>
+<span class="cstat-no" title="statement not covered" >  if (n &lt;= 0) throw new RangeError("must book at least one ticket");</span>
+<span class="cstat-no" title="statement not covered" >  if (n &gt; seatsAvailable(ev)) throw new RangeError("not enough seats");</span>
+<span class="cstat-no" title="statement not covered" >  const gross = ev.priceCents * n;</span>
+<span class="cstat-no" title="statement not covered" >  const total = Math.round(gross * (1 - discountPercent / 100));</span>
+<span class="cstat-no" title="statement not covered" >  return { totalCents: total, tickets: n, discountPercent, eventStartMs: ev.startMs };</span>
+<span class="cstat-no" title="statement not covered" >}</span>
 &nbsp;
 /** Group discount tiers: 5+ tickets 5%, 10+ tickets 10%. */
-export function groupDiscount(n: number): number {
-  if (n &gt;= 10) return 10;
-  if (n &gt;= 5) return 5;
-  return 0;
-}
+<span class="cstat-no" title="statement not covered" >export function groupDiscount(n: number): number {</span>
+<span class="cstat-no" title="statement not covered" >  if (n &gt;= 10) return 10;</span>
+<span class="cstat-no" title="statement not covered" >  if (n &gt;= 5) return 5;</span>
+<span class="cstat-no" title="statement not covered" >  return 0;</span>
+<span class="cstat-no" title="statement not covered" >}</span>
 &nbsp;</pre></td></tr></table></pre>
 
                 <div class='push'></div><!-- for sticky footer -->
@@ -166,16 +166,16 @@ export function groupDiscount(n: number): number {
             <div class='footer quiet pad2 space-top1 center small'>
                 Code coverage generated by
                 <a href="https://istanbul.js.org/" target="_blank" rel="noopener noreferrer">istanbul</a>
-                at 2026-07-24T07:37:15.372Z
+                at 2026-07-24T09:42:53.158Z
             </div>
-        <script src="prettify.js"></script>
+        <script src="../../prettify.js"></script>
         <script>
             window.onload = function () {
                 prettyPrint();
             };
         </script>
-        <script src="sorter.js"></script>
-        <script src="block-navigation.js"></script>
+        <script src="../../sorter.js"></script>
+        <script src="../../block-navigation.js"></script>
     </body>
 </html>
     
