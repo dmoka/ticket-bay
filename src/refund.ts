@@ -29,9 +29,6 @@ export function calculateRefund(order: Order, cancelled: number, nowMs: number):
   if (!Number.isInteger(order.totalCents) || order.totalCents < 0) {
     throw new RangeError("order total out of range");
   }
-  if (nowMs >= order.eventStartMs) {
-    return 0;
-  }
   return Math.round((order.totalCents * cancelled) / order.tickets);
 }
 
