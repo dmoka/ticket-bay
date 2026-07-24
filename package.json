@@ -6,14 +6,20 @@
   "scripts": {
     "test": "vitest run",
     "test:mutation": "stryker run",
-    "test:integration": "vitest run --passWithNoTests tests/integration",
-    "test:ui": "playwright test"
+    "test:integration": "vitest run --config vitest.integration.config.ts",
+    "test:ui": "playwright test",
+    "dev": "tsx server/server.ts"
   },
   "devDependencies": {
+    "@playwright/test": "^1.61.1",
     "@stryker-mutator/core": "^8.7.1",
     "@stryker-mutator/vitest-runner": "^8.7.1",
+    "@testcontainers/postgresql": "^12.0.4",
+    "@types/pg": "^8.20.0",
     "@vitest/coverage-v8": "^2.1.9",
     "fast-check": "^3.23.1",
+    "pg": "^8.22.0",
+    "tsx": "^4.23.1",
     "typescript": "^5.7.2",
     "vitest": "^2.1.8"
   }

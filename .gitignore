@@ -1,3 +1,5 @@
 node_modules/
 reports/
 .stryker-tmp/
+test-results/
+playwright-report/
