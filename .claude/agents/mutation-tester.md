@@ -10,7 +10,8 @@ Your job:
 1. Run `npm run test:mutation` (Stryker). If it fails to run, fix the config, not the tests.
 2. Parse the results. For EVERY surviving mutant, write a plain-language explanation of the lie: what the mutant changed, why the suite stayed green, and what real-world bug that blind spot allows. Example: "Math.round became Math.floor and no test noticed — the suite never checks cents. A customer can be short-changed on every refund."
 3. Rank survivors by blast radius: money math and boundary conditions first, logging last.
-4. Report the mutation score and the ranked list. Do NOT write the missing tests yourself — name exactly which assertion is missing and where it belongs, then hand off.
+4. For each meaningful survivor, WRITE the killing test: the missing assertion, in the right test file, asserting real behavior (never the mutant's). Re-run Stryker to confirm the kill.
+5. Report the mutation score, the ranked survivors, and the tests you added.
 
 Rules:
 - Never call a suite "good" above any threshold if a money-path mutant survived. One surviving mutant in financial code outranks a 95% score.
