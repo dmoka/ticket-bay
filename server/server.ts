@@ -5,12 +5,17 @@ import { bookTickets, groupDiscount, Event } from "../src/booking";
 import { netRefund, Order } from "../src/refund";
 
 const PORT = Number(process.env.PORT ?? 4173);
+// Injectable so a test can build an order small enough that the minimum refund
+// fee swallows the whole refund. At the default 5000 no bookable quantity
+// produces a sub-50-cent order, which leaves the seat-release condition below
+// indistinguishable from `refundCents > 0`.
+const PRICE_CENTS = Number(process.env.PRICE_CENTS ?? 5000);
 const event: Event = {
   id: "rockfest",
   name: "RockFest 2026",
   totalSeats: 100,
   seatsSold: 40,
-  priceCents: 5000,
+  priceCents: PRICE_CENTS,
   startMs: Date.now() + 30 * 24 * 3600 * 1000,
 };
 const orders = new Map<number, { order: Order; refunded: boolean }>();
@@ -19,7 +24,7 @@ let nextId = 1;
 const page = `<!doctype html><html><head><meta charset="utf-8"><title>TicketBay</title>
 <style>body{font-family:sans-serif;max-width:480px;margin:40px auto;padding:0 16px}
 button{padding:8px 16px;margin:8px 0}#refund-amount{font-weight:bold}</style></head><body>
-<h1>TicketBay</h1><h2>RockFest 2026 — €50.00 per ticket</h2>
+<h1>TicketBay</h1><h2>RockFest 2026 — €${(PRICE_CENTS / 100).toFixed(2)} per ticket</h2>
 <form id="book-form"><label>Tickets: <input id="tickets" name="tickets" type="number" value="2" min="1"></label>
 <button type="submit">Book tickets</button></form>
 <p id="order-info" hidden>Paid: <span id="paid-amount"></span> cents (order <span id="order-id"></span>)</p>
@@ -67,11 +72,20 @@ createServer(async (req, res) => {
         const rec = orders.get(data.id);
         if (!rec) throw new RangeError("no such order");
         if (rec.refunded) throw new RangeError("order already refunded");
-        const refundCents = netRefund(rec.order, rec.order.tickets, Date.now());
+        const now = Date.now();
+        const refundCents = netRefund(rec.order, rec.order.tickets, now);
         // Flag rather than delete: the order still exists, it is just spent.
         // Deleting made a second refund look like "no such order".
         rec.refunded = true;
-        event.seatsSold -= rec.order.tickets;
+        // Seats come back only while refunds are still open. Once the event has
+        // started the customer keeps neither the money nor the seat, so putting
+        // it back on sale would sell a paid-for seat to someone else. Gate on
+        // the clock, not on `refundCents` — a pre-event cancellation whose
+        // refund is entirely absorbed by the minimum fee also returns 0, and
+        // those seats DO belong back in inventory.
+        if (now < rec.order.eventStartMs) {
+          event.seatsSold -= rec.order.tickets;
+        }
         res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ refundCents }));
       }
     } catch (e) {

@@ -1,0 +1,22 @@
+{
+  "$schema": "https://raw.githubusercontent.com/stryker-mutator/stryker-js/master/packages/core/schema/stryker-schema.json",
+  "packageManager": "npm",
+  "testRunner": "vitest",
+  "mutate": ["src/orders-repo.ts"],
+  "vitest": { "configFile": "vitest.integration.config.ts" },
+  "concurrency_comment": "Pin to 1. At default concurrency, Postgres container contention across parallel runners produces timeouts, and Stryker SCORES A TIMEOUT AS A KILL — a measured run reported 17 killed / 13 timeout, and every one of those 13 became a genuine assertion-kill at concurrency 1. A parallel run here measures Docker, not your tests.",
+  "concurrency": 1,
+  "timeoutMS_comment": "Container startup happens inside the measured window, so the default 5000ms puts legitimate runs near the timeout — which would inflate the score for the reason above.",
+  "timeoutMS": 60000,
+  "ignorePatterns_comment": "Generated artifacts are not inputs to mutation testing, and copying them into the sandbox races with any concurrent Playwright or reporter run.",
+  "ignorePatterns": [
+    "test-results",
+    "playwright-report",
+    "reports",
+    "coverage",
+    ".stryker-tmp"
+  ],
+  "reporters": ["html", "clear-text", "progress"],
+  "htmlReporter": { "fileName": "reports/mutation/integration.html" },
+  "coverageAnalysis": "perTest"
+}

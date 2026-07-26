@@ -15,6 +15,16 @@ export interface Order {
  *
  * Business rule: cancellations are only allowed BEFORE the event starts.
  * From `eventStartMs` on, the refund is zero.
+ *
+ * Stateless by contract: this is handed the ORIGINAL order on every call and
+ * cannot see cancellations that came before it. Refunding a whole order in one
+ * call is exact. A caller that cancels piecemeal must track the cents already
+ * refunded and cap the running total at `totalCents`, because each call rounds
+ * to the nearest cent independently and the rounding is up whenever
+ * `2 * (totalCents mod tickets) >= tickets`. The overshoot reaches half a cent
+ * per ticket — `{totalCents: 150, tickets: 300}` pays out 150 cents too much
+ * one ticket at a time. Note this is NOT limited to orders that cost less than
+ * they have tickets: `{totalCents: 10001, tickets: 3}` overshoots too.
  */
 export function calculateRefund(order: Order, cancelled: number, nowMs: number): number {
   if (!Number.isInteger(cancelled) || cancelled < 0 || cancelled > order.tickets) {
@@ -32,7 +42,31 @@ export function calculateRefund(order: Order, cancelled: number, nowMs: number):
   if (!Number.isFinite(order.eventStartMs)) {
     throw new RangeError("event start out of range");
   }
-  return Math.round((order.totalCents * cancelled) / order.tickets);
+  // The clock decides whether money moves, so it is validated like any other
+  // input: an absent or broken clock must never fall through to a payout.
+  if (!Number.isFinite(nowMs)) {
+    throw new RangeError("current time out of range");
+  }
+  // Refunds close AT the event start, not after it — `eventStartMs` itself is
+  // already too late.
+  if (nowMs >= order.eventStartMs) return 0;
+  return exactShare(order.totalCents, cancelled, order.tickets);
+}
+
+/**
+ * `total * part / whole`, rounded half up, computed exactly.
+ *
+ * Done in floating point, the multiply overflows 2^53 on totals this function
+ * explicitly admits, and the result can come back a cent above what was paid.
+ * BigInt keeps the product exact; the quotient always fits back in a number
+ * because `part <= whole` means it never exceeds `total`.
+ */
+function exactShare(total: number, part: number, whole: number): number {
+  const numerator = BigInt(total) * BigInt(part);
+  const denominator = BigInt(whole);
+  const quotient = numerator / denominator;
+  const remainder = numerator % denominator;
+  return Number(remainder * 2n >= denominator ? quotient + 1n : quotient);
 }
 
 /** Fee kept by the platform on every refund, in cents. Min 50, 2% of refund. */
