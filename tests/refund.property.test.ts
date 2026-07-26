@@ -409,18 +409,42 @@ describe("netRefund — invariants", () => {
 
 // ---------------------------------------------------------------------------
 // Rounding drift when a cancellation is split
+//
+// THE ORACLE IN THIS BLOCK IS BIGINT, DELIBERATELY. Every quantity here is a
+// sum or a product of refunds, and `calculateRefund` admits totals up to
+// Number.MAX_SAFE_INTEGER — so `refund * tickets` and `refund + refund` are
+// exactly the arithmetic `exactShare` went to BigInt to avoid. Computed in
+// doubles they round, and a rounding oracle auditing exact arithmetic reports
+// the oracle's error as the code's.
+//
+// This is not hypothetical. Until round 2 these properties multiplied in
+// doubles and ran on `realisticScenario`, whose totals stop at 1e12. That cap
+// was the only thing keeping them green: widen it and
+// {totalCents: 9007199254740990, tickets: 11} reports an overshoot of 6 against
+// a bound of 5.5, while the true overshoot is 5 and the source is correct. A
+// test that only passes because its generator is too narrow to reach its own
+// bug is worth less than no test, because it also reads as evidence. They now
+// run on `admittedScenario` — the full range the validator admits, which
+// contains the old realistic range at weight 4 — and the census at the bottom
+// of this file asserts the ugly cases are actually being drawn.
 // ---------------------------------------------------------------------------
 describe("split cancellations — rounding drift", () => {
+  /** The exact refund, as an integer that cannot round. */
+  const exactRefund = (order: Order, cancelled: number, now: number): bigint =>
+    BigInt(calculateRefund(order, cancelled, now));
+
+  const absDiff = (a: bigint, b: bigint): bigint => (a > b ? a - b : b - a);
+
   // INVARIANT: splitting a cancellation in two cannot conjure money. Rounding
   // each half to a cent can gain at most one cent overall.
   it("cancelling a+b in two goes never beats cancelling a+b at once by more than a cent", () => {
     fc.assert(
-      fc.property(realisticScenario, ({ order, cancelled, beforeStart }) => {
+      fc.property(admittedScenario, ({ order, cancelled, beforeStart }) => {
         const a = Math.floor(cancelled / 2);
         const b = cancelled - a;
-        const split = calculateRefund(order, a, beforeStart) + calculateRefund(order, b, beforeStart);
-        const oneShot = calculateRefund(order, cancelled, beforeStart);
-        expect(Math.abs(split - oneShot)).toBeLessThanOrEqual(1);
+        const split = exactRefund(order, a, beforeStart) + exactRefund(order, b, beforeStart);
+        const oneShot = exactRefund(order, cancelled, beforeStart);
+        expect(absDiff(split, oneShot) <= 1n).toBe(true);
       }),
       RUNS,
     );
@@ -431,7 +455,7 @@ describe("split cancellations — rounding drift", () => {
   // not rounding.
   it("splitting into k parts drifts by at most (k+1)/2 cents", () => {
     fc.assert(
-      fc.property(realisticScenario, ({ order, cancelled, beforeStart }) => {
+      fc.property(admittedScenario, ({ order, cancelled, beforeStart }) => {
         const parts: number[] = [];
         let left = cancelled;
         while (left > 0) {
@@ -439,9 +463,10 @@ describe("split cancellations — rounding drift", () => {
           parts.push(take);
           left -= take;
         }
-        const split = parts.reduce((sum, p) => sum + calculateRefund(order, p, beforeStart), 0);
-        const oneShot = calculateRefund(order, cancelled, beforeStart);
-        expect(Math.abs(split - oneShot)).toBeLessThanOrEqual((parts.length + 1) / 2);
+        const split = parts.reduce((sum, p) => sum + exactRefund(order, p, beforeStart), 0n);
+        const oneShot = exactRefund(order, cancelled, beforeStart);
+        // |split - oneShot| <= (k + 1) / 2, in integers so the halves are exact.
+        expect(2n * absDiff(split, oneShot) <= BigInt(parts.length + 1)).toBe(true);
       }),
       RUNS,
     );
@@ -454,20 +479,59 @@ describe("split cancellations — rounding drift", () => {
   // of tickets in every such case, so the overshoot can never exceed
   // tickets / 2. Verified tight — {totalCents: 150, tickets: 300} hits it
   // exactly. Anything above this bound is a real leak, not rounding.
+  //
+  // The `tickets > 200` early return this used to carry guarded a loop that no
+  // longer exists — a single multiply is cheap at any ticket count — and it was
+  // silently shrinking the sample. Gone.
   it("cancelling one ticket at a time overshoots the total by at most half a cent per ticket", () => {
     fc.assert(
-      fc.property(realisticScenario, ({ order, beforeStart }) => {
-        if (order.tickets > 200) return; // keep the loop cheap
-        const perTicket = calculateRefund(order, 1, beforeStart) * order.tickets;
-        expect(perTicket - order.totalCents).toBeLessThanOrEqual(order.tickets / 2);
+      fc.property(admittedScenario, ({ order, beforeStart }) => {
+        const perTicket = exactRefund(order, 1, beforeStart) * BigInt(order.tickets);
+        const overshoot = perTicket - BigInt(order.totalCents);
+        // overshoot <= tickets / 2, in integers: 2 * overshoot <= tickets.
+        expect(2n * overshoot <= BigInt(order.tickets)).toBe(true);
       }),
       RUNS,
     );
   });
 
+  // The case that exposed the rounding oracle, pinned so nobody quietly
+  // "simplifies" the BigInt above back into a `*`. This asserts a fact about
+  // IEEE-754, not about src/: above 2^53 doubles hold only even integers, so an
+  // odd product in that range cannot survive a double multiply. The share
+  // itself is the exact half-up proportional share the docstring promises, so
+  // pinning it pins the spec rather than the implementation.
+  it("the double-precision product an oracle would reach for is wrong at the top of the range", () => {
+    const order: Order = {
+      totalCents: 9_007_199_254_740_990,
+      tickets: 11,
+      discountPercent: 0,
+      eventStartMs: 1,
+    };
+    const share = calculateRefund(order, 1, 0);
+    expect(share).toBe(818_836_295_885_545);
+
+    const exact = BigInt(share) * BigInt(order.tickets);
+    expect(exact).toBe(9_007_199_254_740_995n);
+    expect(exact).toBeGreaterThan(BigInt(Number.MAX_SAFE_INTEGER));
+    expect(exact % 2n).toBe(1n); // odd, and past 2^53 — unrepresentable
+
+    // What a double multiply answers instead: one cent that was never paid.
+    expect(share * order.tickets).toBe(9_007_199_254_740_996);
+    expect(BigInt(share * order.tickets) - exact).toBe(1n);
+
+    // The bound the source actually honours. 5 <= 11/2; the float oracle saw 6.
+    expect(exact - BigInt(order.totalCents)).toBe(5n);
+    expect(2n * (exact - BigInt(order.totalCents)) <= BigInt(order.tickets)).toBe(true);
+  });
+
   // The worst per-ticket drifts found, pinned as bounds rather than exact
   // values, so that tightening the rounding later does not break these — they
   // only pin that the leak never grows.
+  //
+  // These five multiply in doubles, and that is fine HERE and only here: every
+  // product below is a two-digit or five-digit number, exactly representable.
+  // Do not copy the pattern into anything that runs on generated totals.
   //
   // NOTE: the RELATIVE damage peaks at a 2x payout, and the minimal case is a
   // one-cent two-ticket order, not the hundred-ticket one. The absolute
@@ -735,4 +799,82 @@ describe("bookTickets -> calculateRefund round trip", () => {
     );
   });
 
+});
+
+// ---------------------------------------------------------------------------
+// Generator census.
+//
+// Everything above is worth exactly what its generators produced. These sample
+// the arbitraries the properties consume and assert the measurements, so a
+// future edit that narrows a generator fails a test instead of quietly turning
+// a property into decoration.
+//
+// The first one is the reason this block exists. The drift properties spent two
+// rounds green while being unable to reach the range where their own oracle was
+// wrong; nothing failed, because nothing was looking. This asserts the reach
+// itself, not the conclusion.
+// ---------------------------------------------------------------------------
+describe("generator census — the properties above see the ugly cases", () => {
+  const SAMPLES = 5_000;
+
+  it("the drift generator reaches per-ticket payouts that no double can hold", () => {
+    const cases = fc.sample(admittedScenario, SAMPLES);
+    let unrepresentable = 0;
+    let doubleWouldLie = 0;
+    let overshooting = 0;
+    for (const { order, beforeStart } of cases) {
+      const share = calculateRefund(order, 1, beforeStart);
+      const exact = BigInt(share) * BigInt(order.tickets);
+      if (exact > BigInt(Number.MAX_SAFE_INTEGER)) unrepresentable++;
+      if (BigInt(share * order.tickets) !== exact) doubleWouldLie++;
+      if (exact > BigInt(order.totalCents)) overshooting++;
+    }
+    // Measured at ~3.6%, ~0.9% and ~38% of samples; these thresholds sit well
+    // below the observed floor across repeated runs.
+    expect(unrepresentable).toBeGreaterThan(SAMPLES * 0.01);
+    expect(doubleWouldLie).toBeGreaterThan(10);
+    expect(overshooting).toBeGreaterThan(SAMPLES * 0.1);
+  });
+
+  it("the drift generator still covers the small, ordinary orders it always did", () => {
+    const orders = fc.sample(admittedScenario, SAMPLES).map((c) => c.order);
+    expect(orders.filter((o) => o.totalCents === 0).length).toBeGreaterThan(0);
+    expect(orders.filter((o) => o.totalCents === 1).length).toBeGreaterThan(0);
+    expect(orders.filter((o) => o.totalCents > 0 && o.totalCents <= 10_000).length).toBeGreaterThan(SAMPLES * 0.1);
+    expect(orders.filter((o) => o.totalCents > Number.MAX_SAFE_INTEGER / 2).length).toBeGreaterThan(SAMPLES * 0.3);
+    expect(orders.every((o) => Number.isInteger(o.totalCents) && o.totalCents >= 0)).toBe(true);
+    expect(orders.every((o) => o.totalCents <= Number.MAX_SAFE_INTEGER)).toBe(true);
+  });
+
+  it("the drift generator reaches single tickets, big blocks and totals that do not divide", () => {
+    const orders = fc.sample(admittedScenario, SAMPLES).map((c) => c.order);
+    expect(orders.filter((o) => o.tickets === 1).length).toBeGreaterThan(0);
+    expect(orders.filter((o) => o.tickets > 200).length).toBeGreaterThan(SAMPLES * 0.02);
+    expect(orders.filter((o) => o.tickets > 1 && o.totalCents % o.tickets !== 0).length).toBeGreaterThan(
+      SAMPLES * 0.2,
+    );
+    expect(orders.filter((o) => o.totalCents > 0 && o.totalCents < o.tickets).length).toBeGreaterThan(0);
+    expect(orders.filter((o) => o.discountPercent === 100).length).toBeGreaterThan(0);
+    expect(orders.filter((o) => !Number.isInteger(o.discountPercent)).length).toBeGreaterThan(0);
+  });
+
+  it("cancellations reach nothing, one ticket, the whole order and a strict partial", () => {
+    const cases = fc.sample(admittedScenario, SAMPLES);
+    expect(cases.every((c) => Number.isInteger(c.cancelled) && c.cancelled >= 0 && c.cancelled <= c.order.tickets))
+      .toBe(true);
+    expect(cases.filter((c) => c.cancelled === 0).length).toBeGreaterThan(0);
+    expect(cases.filter((c) => c.cancelled === 1).length).toBeGreaterThan(0);
+    expect(cases.filter((c) => c.cancelled === c.order.tickets).length).toBeGreaterThan(0);
+    expect(cases.filter((c) => c.cancelled > 0 && c.cancelled < c.order.tickets).length).toBeGreaterThan(
+      SAMPLES * 0.1,
+    );
+  });
+
+  it("the clock generator stays strictly before the start, including one ULP before", () => {
+    const cases = fc.sample(realisticScenario, SAMPLES);
+    expect(cases.every((c) => Number.isFinite(c.beforeStart) && c.beforeStart < c.order.eventStartMs)).toBe(true);
+    expect(cases.filter((c) => c.beforeStart === previousDouble(c.order.eventStartMs)).length).toBeGreaterThan(0);
+    expect(cases.filter((c) => c.order.eventStartMs - c.beforeStart > 86_400_000).length).toBeGreaterThan(0);
+    expect(cases.filter((c) => c.order.eventStartMs <= 0).length).toBeGreaterThan(0);
+  });
 });

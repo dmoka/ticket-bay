@@ -13,6 +13,11 @@ export default defineConfig({
       // that have nothing to do with your code, and it is gitignored, so the
       // noise never shows up in `git status`.
       "**/.stryker-tmp/**",
+      // Agent worktrees are checkouts of this same repo living inside it, so
+      // every test file appears twice and every count doubles. Same hazard as
+      // the Stryker sandbox above: a tool writing a copy of the project into a
+      // directory the test runner is happy to walk.
+      "**/.claude/worktrees/**",
       "tests/integration/**",
       "e2e/**",
     ],

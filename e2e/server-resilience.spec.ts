@@ -16,8 +16,6 @@ import { test, expect, BrowserContext, Page } from "@playwright/test";
 import { startClockServer, ClockServer } from "./support/harness";
 import { attemptBooking, bookingOutcome, bookThroughUI, cancelButton, collectDialogs, refundLine } from "./support/ui";
 
-// Own port range so this file never fights the other harness-based specs.
-let nextPort = 4620;
 const running: ClockServer[] = [];
 
 test.afterEach(() => {
@@ -30,7 +28,7 @@ async function postJunk(page: Page, url: string, body: string) {
 }
 
 test("a malformed request is refused, and the customer's order survives it", async ({ context }) => {
-  const server = await startClockServer(nextPort++, nextPort++);
+  const server = await startClockServer();
   running.push(server);
 
   const buyer = await context.newPage();
@@ -57,7 +55,7 @@ test("a malformed request is refused, and the customer's order survives it", asy
 });
 
 test("a malformed request does not put already-sold seats back on the market", async ({ context }) => {
-  const server = await startClockServer(nextPort++, nextPort++);
+  const server = await startClockServer();
   running.push(server);
 
   // Fixture: 100 seats, 40 already sold. One customer takes the remaining 60.

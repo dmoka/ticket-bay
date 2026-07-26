@@ -15,6 +15,10 @@
 import { createServer } from "node:http";
 
 const controlPort = Number(process.env.CONTROL_PORT ?? 4274);
+// Echoed back on the control channel so the harness can prove the process
+// answering on these ports is the one it just started, and not a server leaked
+// by an earlier run that is still holding them. See harness.ts.
+const instanceToken = process.env.INSTANCE_TOKEN ?? "";
 const bootNow = Date.now();
 let frozenNow = bootNow;
 Date.now = () => frozenNow;
@@ -34,7 +38,9 @@ createServer((req, res) => {
     res.writeHead(404, { "content-type": "application/json" }).end(JSON.stringify({ error: "not found" }));
     return;
   }
-  res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ now: frozenNow }));
+  res.writeHead(200, { "content-type": "application/json" }).end(
+    JSON.stringify({ now: frozenNow, token: instanceToken }),
+  );
 }).listen(controlPort, () => console.log(`clock control on http://localhost:${controlPort}`));
 
 // Dynamic import so the Date.now patch is in place before the server module runs

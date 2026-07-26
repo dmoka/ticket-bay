@@ -15,8 +15,6 @@ import { test, expect, BrowserContext } from "@playwright/test";
 import { startClockServer, ClockServer } from "./support/harness";
 import { attemptBooking, bookingOutcome, bookThroughUI, cancelButton, collectDialogs, paidLine, refundLine } from "./support/ui";
 
-// Own port range so this file never fights the other harness-based specs.
-let nextPort = 4700;
 const running: ClockServer[] = [];
 
 test.afterEach(() => {
@@ -24,7 +22,7 @@ test.afterEach(() => {
 });
 
 async function freshVenue(context: BrowserContext, env: Record<string, string> = {}) {
-  const server = await startClockServer(nextPort++, nextPort++, env);
+  const server = await startClockServer(env);
   running.push(server);
   return server;
 }

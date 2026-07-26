@@ -22,7 +22,16 @@ export async function bookThroughUI(page: Page, tickets: string): Promise<Booked
   const booked = page.waitForResponse((r) => r.url().endsWith("/api/book"));
   await page.getByLabel("Tickets:").fill(tickets);
   await page.getByRole("button", { name: "Book tickets" }).click();
-  const order = await (await booked).json();
+  const response = await booked;
+  const order = await response.json();
+  // A refused booking shows the user an alert and leaves the paid line hidden.
+  // Reporting that as "expected visible, received hidden" hides the one fact
+  // that explains it, so surface what the server actually said instead.
+  if (!response.ok()) {
+    throw new Error(
+      `booking ${tickets} ticket(s) at ${response.url()} was refused with ${response.status()}: ${JSON.stringify(order)}`,
+    );
+  }
   await expect(paidLine(page)).toBeVisible();
   return order as BookedOrder;
 }
