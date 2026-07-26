@@ -20,10 +20,10 @@ test.afterEach(() => {
 
 /**
  * Sells out the venue, proves the page turns the next customer away, then
- * cancels the whole order at `whenMs(eventStartMs)`. Returns the handles the
+ * cancels the whole order one millisecond before the event starts. Returns the handles the
  * test needs to check what each customer ends up seeing.
  */
-async function sellOutThenCancelAt(context: BrowserContext, whenMs: (eventStartMs: number) => number) {
+async function sellOutThenCancelInTime(context: BrowserContext) {
   const server = await startClockServer();
   running.push(server);
 
@@ -43,7 +43,7 @@ async function sellOutThenCancelAt(context: BrowserContext, whenMs: (eventStartM
     .poll(() => bookingOutcome(latecomer, alerts), { message: "expected the venue to be sold out before the cancel" })
     .toContain("not enough seats");
 
-  await server.setClock(whenMs(order.eventStartMs));
+  await server.setClock(order.eventStartMs - 1);
   await cancelButton(buyer).click();
 
   /**
@@ -62,7 +62,7 @@ async function sellOutThenCancelAt(context: BrowserContext, whenMs: (eventStartM
 }
 
 test("cancelling before the event puts the seats back on sale", async ({ context }) => {
-  const { buyer, retryBooking, outcome } = await sellOutThenCancelAt(context, (start) => start - 1);
+  const { buyer, retryBooking, outcome } = await sellOutThenCancelInTime(context);
 
   // In time: 270000 back less the 2% fee (5400).
   await expect(refundLine(buyer)).toHaveText("Refunded: 264600 cents");

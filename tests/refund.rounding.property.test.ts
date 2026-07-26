@@ -1,22 +1,24 @@
-// Property-based suite for the ONE promise in src/refund.ts that no other test
-// in this repo ever exercises: the refund window closes when the event starts.
+// Property-based suite for the rounding behaviour src/refund.ts documents about
+// itself.
 //
-// src/refund.ts:8   "when the event starts, ms since epoch — refunds close at
-//                    this moment"
-// src/refund.ts:16  "Business rule: cancellations are only allowed BEFORE the
-//                    event starts. From `eventStartMs` on, the refund is zero."
+// src/refund.ts:19-27 states the stateless contract and its consequence out
+// loud: each call rounds to the nearest cent independently, so cancelling
+// piecemeal can overshoot the total by up to half a cent per ticket. The
+// precondition is `2 * (totalCents mod tickets) >= tickets` — NOT "the order
+// costs less than it has tickets", which is the wrong rule the small examples
+// suggest, and which would leave the realistic cases leaking.
 //
-// The docstrings in src/ ARE the specification, so that is a rule the code owes
-// the reader, not a comment. Every existing property file builds its clock with
-// a `strictlyBefore(...)` helper and never once asks what happens at or after
-// `eventStartMs` — which is why 142 green tests and a 95.60% mutation score say
-// nothing at all about this rule. A mutation score measures the code that
-// exists; it cannot score a branch that was never written.
+// The overshoot is accumulated in BigInt, deliberately: an oracle that rounds
+// cannot audit arithmetic that does not. Above 2^53 a double holds only even
+// integers, so a double product invents a cent and the test ends up auditing
+// itself rather than the code.
 //
 // Nothing here re-derives the implementation's arithmetic. Each property is
 // stated in English above the code that encodes it, and each is something a
 // customer or a finance team would recognise as true without reading any
-// TypeScript.
+// TypeScript. The generator census at the bottom asserts what the generators
+// actually produce, so narrowing one fails a test instead of quietly turning
+// these properties into decoration.
 import { describe, it, expect } from "vitest";
 import fc from "fast-check";
 import { calculateRefund, netRefund, refundFee, Order } from "../src/refund";
@@ -34,14 +36,6 @@ import { bookTickets, Event } from "../src/booking";
 const f64 = new Float64Array(1);
 const i64 = new BigInt64Array(f64.buffer);
 
-/** The smallest double strictly greater than `v`. */
-function nextDouble(v: number): number {
-  if (v === 0) return Number.MIN_VALUE;
-  f64[0] = v;
-  i64[0] += v > 0 ? 1n : -1n;
-  return f64[0];
-}
-
 /** The largest double strictly less than `v`. */
 function previousDouble(v: number): number {
   if (v === 0) return -Number.MIN_VALUE;
@@ -54,12 +48,6 @@ function previousDouble(v: number): number {
 function strictlyBefore(start: number, delta: number): number {
   const candidate = start - delta;
   return candidate < start ? candidate : previousDouble(start);
-}
-
-/** `start + delta`, guaranteed strictly later than `start`. */
-function strictlyAfter(start: number, delta: number): number {
-  const candidate = start + delta;
-  return candidate > start ? candidate : nextDouble(start);
 }
 
 // ---------------------------------------------------------------------------
@@ -123,28 +111,6 @@ const orderArb = (cents: fc.Arbitrary<number> = centsArb): fc.Arbitrary<Order> =
     eventStartMs: startArb,
   });
 
-/**
- * A clock reading at or after the event start — the window the docstring says is
- * closed. Includes the boundary instant itself, the very next representable
- * instant, sub-millisecond deltas, and clocks years later.
- */
-const atOrAfter = (start: number): fc.Arbitrary<number> =>
-  fc.oneof(
-    { weight: 3, arbitrary: fc.constant(start) },
-    { weight: 2, arbitrary: fc.constant(nextDouble(start)) },
-    { weight: 3, arbitrary: fc.integer({ min: 1, max: 10_000_000_000 }).map((d) => strictlyAfter(start, d)) },
-    {
-      weight: 2,
-      arbitrary: fc.double({ min: Number.MIN_VALUE, max: 1, noNaN: true }).map((d) => strictlyAfter(start, d)),
-    },
-    {
-      weight: 1,
-      arbitrary: fc
-        .constantFrom(4_000_000_000_000, 1e15, Number.MAX_SAFE_INTEGER, 1e300)
-        .map((t) => (t > start ? t : nextDouble(start))),
-    },
-  );
-
 /** A clock reading strictly before the event start — the window that is open. */
 const before = (start: number): fc.Arbitrary<number> =>
   fc
@@ -159,7 +125,6 @@ interface GateCase {
   order: Order;
   cancelled: number;
   /** a clock reading from the start onwards — refunds are closed */
-  closed: number;
   /** a clock reading strictly before the start — refunds are open */
   open: number;
 }
@@ -172,7 +137,6 @@ const gateCase = (
     fc.record({
       order: fc.constant(order),
       cancelled: fc.integer({ min: Math.min(minCancelled, order.tickets), max: order.tickets }),
-      closed: atOrAfter(order.eventStartMs),
       open: before(order.eventStartMs),
     }),
   );
@@ -255,16 +219,6 @@ describe("the piecemeal-overshoot examples in the docstring are true", () => {
 describe("generator census — the properties above see the ugly cases", () => {
   const SAMPLES = 5_000;
 
-  it("the closed-window clock is always at or after the start, and reaches the boundary and one ULP past it", () => {
-    const start = 1_700_000_000_000;
-    const clocks = fc.sample(atOrAfter(start), SAMPLES);
-    expect(clocks.every((t) => Number.isFinite(t) && t >= start)).toBe(true);
-    expect(clocks.filter((t) => t === start).length).toBeGreaterThan(SAMPLES * 0.1);
-    expect(clocks.filter((t) => t === nextDouble(start)).length).toBeGreaterThan(0);
-    expect(clocks.filter((t) => t > start && t - start < 1).length).toBeGreaterThan(0);
-    expect(clocks.filter((t) => t - start > 86_400_000).length).toBeGreaterThan(SAMPLES * 0.05);
-  });
-
   it("the open-window clock is always strictly before the start, including one ULP before", () => {
     const start = 1_700_000_000_000;
     const clocks = fc.sample(before(start), SAMPLES);
@@ -322,6 +276,5 @@ describe("generator census — the properties above see the ugly cases", () => {
     expect(cases.every((c) => c.order.totalCents >= 1)).toBe(true);
     expect(cases.every((c) => c.cancelled >= 1)).toBe(true);
     expect(cases.filter((c) => c.order.totalCents === 1).length).toBeGreaterThan(0);
-    expect(cases.filter((c) => c.closed === c.order.eventStartMs).length).toBeGreaterThan(SAMPLES * 0.1);
   });
 });

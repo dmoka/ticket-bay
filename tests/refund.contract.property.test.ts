@@ -26,14 +26,6 @@ import { bookTickets, groupDiscount, seatsAvailable, Event } from "../src/bookin
 const f64 = new Float64Array(1);
 const i64 = new BigInt64Array(f64.buffer);
 
-/** The smallest double strictly greater than `v`. */
-function nextDouble(v: number): number {
-  if (v === 0) return Number.MIN_VALUE;
-  f64[0] = v;
-  i64[0] += v > 0 ? 1n : -1n;
-  return f64[0];
-}
-
 /** The largest double strictly less than `v`. */
 function previousDouble(v: number): number {
   if (v === 0) return -Number.MIN_VALUE;
@@ -120,15 +112,6 @@ const gateCase = (cents: fc.Arbitrary<number> = centsArb): fc.Arbitrary<GateCase
       open: before(order.eventStartMs),
     }),
   );
-
-/** Cancellations that actually cancel something, on orders that actually cost something. */
-const payingGateCase: fc.Arbitrary<GateCase> = orderArb(payingCentsArb).chain((order) =>
-  fc.record({
-    order: fc.constant(order),
-    cancelled: fc.integer({ min: 1, max: order.tickets }),
-    open: before(order.eventStartMs),
-  }),
-);
 
 const RUNS = { numRuns: 3000 } as const;
 
