@@ -1,11 +1,36 @@
 // Money paths through a real browser: what the customer is told they paid, and
 // what they are told they got back. Every assertion is on rendered text or on a
 // control the user can (or can no longer) click.
-import { test, expect } from "@playwright/test";
-import { cancelButton, paidLine, refundLine } from "./support/ui";
+//
+// Each test gets its OWN server (support/harness.ts), like the rest of the
+// suite. These specs used to share Playwright's `webServer` on 4173 with
+// booking-refund.spec.ts, and that server keeps `orders` and `event.seatsSold`
+// as module-level state (server/server.ts:21 and the `event` object). Two spec
+// files running in parallel workers were mutating one venue's inventory while
+// asserting exact amounts against it — and because `reuseExistingServer` hands
+// a leaked server to the NEXT run, that state outlived the run that created it.
+// A pristine venue per test is what makes an exact-cents assertion meaningful.
+import { test, expect, BrowserContext } from "@playwright/test";
+import { startClockServer, ClockServer } from "./support/harness";
+import { cancelButton, collectDialogs, paidLine, refundLine } from "./support/ui";
 
-test("group booking: the refund matches the discounted price the user was charged", async ({ page }) => {
-  await page.goto("/");
+const running: ClockServer[] = [];
+
+test.afterEach(() => {
+  while (running.length) running.pop()!.stop();
+});
+
+/** A freshly booted venue and a page already on it. */
+async function freshVenue(context: BrowserContext) {
+  const server = await startClockServer();
+  running.push(server);
+  const page = await context.newPage();
+  await page.goto(server.url);
+  return page;
+}
+
+test("group booking: the refund matches the discounted price the user was charged", async ({ context }) => {
+  const page = await freshVenue(context);
   await page.getByLabel("Tickets:").fill("10");
   await page.getByRole("button", { name: "Book tickets" }).click();
 
@@ -17,8 +42,8 @@ test("group booking: the refund matches the discounted price the user was charge
   await expect(refundLine(page)).toHaveText("Refunded: 44100 cents");
 });
 
-test("the 5-ticket group tier is charged and refunded at 5%, not 10%", async ({ page }) => {
-  await page.goto("/");
+test("the 5-ticket group tier is charged and refunded at 5%, not 10%", async ({ context }) => {
+  const page = await freshVenue(context);
   await page.getByLabel("Tickets:").fill("5");
   await page.getByRole("button", { name: "Book tickets" }).click();
 
@@ -30,8 +55,8 @@ test("the 5-ticket group tier is charged and refunded at 5%, not 10%", async ({ 
   await expect(refundLine(page)).toHaveText("Refunded: 23275 cents");
 });
 
-test("four tickets get no group discount, and the refund reflects the full price", async ({ page }) => {
-  await page.goto("/");
+test("four tickets get no group discount, and the refund reflects the full price", async ({ context }) => {
+  const page = await freshVenue(context);
   await page.getByLabel("Tickets:").fill("4");
   await page.getByRole("button", { name: "Book tickets" }).click();
 
@@ -42,8 +67,8 @@ test("four tickets get no group discount, and the refund reflects the full price
   await expect(refundLine(page)).toHaveText("Refunded: 19600 cents");
 });
 
-test("a refunded order cannot be cancelled twice from the page", async ({ page }) => {
-  await page.goto("/");
+test("a refunded order cannot be cancelled twice from the page", async ({ context }) => {
+  const page = await freshVenue(context);
   await page.getByLabel("Tickets:").fill("2");
   await page.getByRole("button", { name: "Book tickets" }).click();
   await expect(paidLine(page)).toHaveText(/^Paid: 10000 cents /);
@@ -57,14 +82,10 @@ test("a refunded order cannot be cancelled twice from the page", async ({ page }
   await expect(refundLine(page)).toHaveText("Refunded: 9800 cents");
 });
 
-test("a booking bigger than the venue is refused and charges nothing", async ({ page }) => {
-  const dialogs: string[] = [];
-  page.on("dialog", async (d) => {
-    dialogs.push(d.message());
-    await d.dismiss();
-  });
+test("a booking bigger than the venue is refused and charges nothing", async ({ context }) => {
+  const page = await freshVenue(context);
+  const dialogs = collectDialogs(page);
 
-  await page.goto("/");
   await page.getByLabel("Tickets:").fill("999");
   await page.getByRole("button", { name: "Book tickets" }).click();
 

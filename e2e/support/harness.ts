@@ -8,6 +8,7 @@
 // Used by BOTH runners: the Playwright specs in e2e/ and several vitest suites
 // in tests/. That is why the explicit-port signature below still exists.
 import { spawn, ChildProcess } from "node:child_process";
+import { createServer as createNetServer } from "node:net";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
@@ -74,6 +75,40 @@ function allocatePorts(): { appPort: number; controlPort: number } {
     );
   }
   return { appPort: laneStart + offset, controlPort: laneStart + offset + 1 };
+}
+
+/** Whether nothing is listening on `port`. Binds the same way the server does. */
+function portIsFree(port: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const probe = createNetServer();
+    probe.once("error", () => resolve(false));
+    probe.once("listening", () => probe.close(() => resolve(true)));
+    probe.listen(port);
+  });
+}
+
+/**
+ * The lane above guarantees no two LIVE workers pick the same pair. It cannot
+ * guarantee the pair is free, because a server leaked by an earlier run (or a
+ * second copy of the suite running alongside this one) is still holding it.
+ * Stepping over an occupied pair keeps the suite honest rather than red for a
+ * reason that has nothing to do with the code under test.
+ *
+ * This is not a retry in the sense the suite forbids: it retries acquiring a
+ * RESOURCE, never an assertion, and it cannot mask a product bug — the token
+ * check still guarantees every spec talks to the server this harness started.
+ * It warns each time it steps over one, so a leak stays visible instead of
+ * being quietly absorbed.
+ */
+async function allocateFreePorts(): Promise<{ appPort: number; controlPort: number }> {
+  for (;;) {
+    const pair = allocatePorts();
+    if ((await portIsFree(pair.appPort)) && (await portIsFree(pair.controlPort))) return pair;
+    console.warn(
+      `[harness] ports ${pair.appPort}/${pair.controlPort} are already in use — stepping over them. ` +
+        `A clock server leaked by an earlier run is the usual cause: pkill -f clock-server.ts`,
+    );
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -202,7 +237,7 @@ export async function startClockServer(
   const pinned = typeof portOrEnv === "number";
   const { appPort, controlPort } = pinned
     ? { appPort: portOrEnv, controlPort: maybeControlPort as number }
-    : allocatePorts();
+    : await allocateFreePorts();
   const env = pinned ? maybeEnv : (portOrEnv ?? {});
 
   const control = `http://localhost:${controlPort}`;
