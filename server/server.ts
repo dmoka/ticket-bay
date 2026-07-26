@@ -13,7 +13,7 @@ const event: Event = {
   priceCents: 5000,
   startMs: Date.now() + 30 * 24 * 3600 * 1000,
 };
-const orders = new Map<number, Order>();
+const orders = new Map<number, { order: Order; refunded: boolean }>();
 let nextId = 1;
 
 const page = `<!doctype html><html><head><meta charset="utf-8"><title>TicketBay</title>
@@ -31,12 +31,15 @@ form.addEventListener('submit',async(e)=>{e.preventDefault();
 const n=Number(document.getElementById('tickets').value);
 const r=await fetch('/api/book',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({tickets:n})});
 const d=await r.json();
+if(!r.ok){alert(d.error||'booking failed');return;}
 document.getElementById('paid-amount').textContent=d.totalCents;
 document.getElementById('order-id').textContent=d.id;
 document.getElementById('order-info').hidden=false;
 const btn=document.getElementById('cancel-btn');btn.hidden=false;
 btn.onclick=async()=>{const rr=await fetch('/api/refund',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({id:d.id})});
 const rd=await rr.json();
+if(!rr.ok){alert(rd.error||'refund failed');return;}
+btn.hidden=true;
 document.getElementById('refund-amount').textContent=rd.refundCents;
 document.getElementById('refund-info').hidden=false;};
 });
@@ -54,14 +57,21 @@ createServer(async (req, res) => {
     try {
       if (req.url === "/api/book") {
         const order = bookTickets(event, data.tickets, groupDiscount(data.tickets));
+        // Seats are only committed once the booking succeeded, so a rejected
+        // booking can never consume inventory.
+        event.seatsSold += order.tickets;
         const id = nextId++;
-        orders.set(id, order);
+        orders.set(id, { order, refunded: false });
         res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ id, ...order }));
       } else {
-        const order = orders.get(data.id);
-        if (!order) throw new RangeError("no such order");
-        const refundCents = netRefund(order, order.tickets, Date.now());
-        orders.delete(data.id);
+        const rec = orders.get(data.id);
+        if (!rec) throw new RangeError("no such order");
+        if (rec.refunded) throw new RangeError("order already refunded");
+        const refundCents = netRefund(rec.order, rec.order.tickets, Date.now());
+        // Flag rather than delete: the order still exists, it is just spent.
+        // Deleting made a second refund look like "no such order".
+        rec.refunded = true;
+        event.seatsSold -= rec.order.tickets;
         res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ refundCents }));
       }
     } catch (e) {

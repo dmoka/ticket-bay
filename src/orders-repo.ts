@@ -9,9 +9,12 @@ export async function initSchema(db: Client): Promise<void> {
       total_cents INTEGER NOT NULL,
       tickets INTEGER NOT NULL,
       discount_percent INTEGER NOT NULL,
-      event_start_ms BIGINT NOT NULL
+      event_start_ms BIGINT NOT NULL,
+      refunded_at TIMESTAMPTZ
     )
   `);
+  // Older databases created before refunds were tracked.
+  await db.query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS refunded_at TIMESTAMPTZ`);
 }
 
 export async function saveOrder(db: Client, o: Order): Promise<number> {
@@ -34,4 +37,23 @@ export async function getOrder(db: Client, id: number): Promise<Order | null> {
     // BIGINT comes back from Postgres as a string — a real-driver truth no mock would tell you
     eventStartMs: Number(row.event_start_ms),
   };
+}
+
+/**
+ * Mark an order refunded, exactly once. Returns true if this call performed the
+ * refund, false if it had already been refunded (or the order does not exist).
+ * The guard lives in the WHERE clause so concurrent callers cannot both win.
+ */
+export async function markRefunded(db: Client, id: number): Promise<boolean> {
+  const r = await db.query(
+    `UPDATE orders SET refunded_at = now() WHERE id = $1 AND refunded_at IS NULL`,
+    [id],
+  );
+  return r.rowCount === 1;
+}
+
+/** Whether an order has already been refunded. */
+export async function isRefunded(db: Client, id: number): Promise<boolean> {
+  const r = await db.query(`SELECT refunded_at FROM orders WHERE id = $1`, [id]);
+  return r.rows.length > 0 && r.rows[0].refunded_at !== null;
 }
