@@ -47,6 +47,9 @@ export function calculateRefund(order: Order, cancelled: number, nowMs: number):
   if (!Number.isFinite(nowMs)) {
     throw new RangeError("current time out of range");
   }
+  // Refunds close AT the event start, not after it — `eventStartMs` itself is
+  // already too late.
+  if (nowMs >= order.eventStartMs) return 0;
   return exactShare(order.totalCents, cancelled, order.tickets);
 }
 

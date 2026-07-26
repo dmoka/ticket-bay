@@ -76,3 +76,16 @@ test("cancelling before the event puts the seats back on sale", async ({ context
     })
     .toContain("Paid: 5000 cents");
 });
+
+test("cancelling once the event has started keeps the seats sold", async ({ context }) => {
+  const { retryBooking, outcome } = await sellOutThenCancelAt(context, (start) => start);
+
+  // The refund window has closed, so the customer keeps the seat they paid for.
+  // Putting it back on sale would sell a paid-for seat to someone else.
+  await retryBooking();
+  await expect
+    .poll(outcome, {
+      message: "a seat cancelled after the event started was resold — the original customer already owns it",
+    })
+    .toContain("not enough seats");
+});

@@ -154,10 +154,10 @@ describe("storage fidelity of money fields (real Postgres)", () => {
     expect(typeof loaded.totalCents).toBe("number");
   });
 
-  it("does not silently corrupt a total the schema cannot hold", async () => {
-    // calculateRefund accepts totals up to Number.MAX_SAFE_INTEGER (src/refund.ts:29)
-    // but the orders.total_cents column is INTEGER. Whatever the repo does here, it
-    // must not quietly store a different number than the caller paid.
+  it("does not silently corrupt a total that overflows INT4", async () => {
+    // calculateRefund accepts totals up to Number.MAX_SAFE_INTEGER (src/refund.ts:39)
+    // and orders.total_cents is BIGINT (src/orders-repo.ts:13), so a total past the
+    // old INT4 ceiling must round-trip intact — not throw, and not come back changed.
     const order = {
       totalCents: 3_000_000_000,
       tickets: 2,
@@ -165,23 +165,17 @@ describe("storage fidelity of money fields (real Postgres)", () => {
       eventStartMs: EVENT_START,
     };
 
-    let id: number | null = null;
-    try {
-      id = await saveOrder(db, order);
-    } catch {
-      id = null; // rejected loudly — acceptable
-    }
+    const id = await saveOrder(db, order);
+    const loaded = await getOrder(db, id);
 
-    if (id !== null) {
-      const loaded = await getOrder(db, id);
-      expect(loaded!.totalCents).toBe(order.totalCents);
-    }
+    expect(loaded!.totalCents).toBe(order.totalCents);
   });
 });
 
-// The gate compares nowMs against an eventStartMs that Postgres returns as a BIGINT
-// *string*, coerced with Number() in getOrder (src/orders-repo.ts:38). A cutoff is only
-// as trustworthy as that coercion, so the boundary is checked on the loaded value.
+// The cut-off (src/refund.ts:52) compares nowMs against an eventStartMs that Postgres
+// returns as a BIGINT *string*, coerced with Number() in getOrder (src/orders-repo.ts:46).
+// A cut-off is only as trustworthy as that coercion, so the boundary is checked on the
+// loaded value. The closed side of the boundary lives in refund-time-gate.test.ts.
 describe("the stored event start survives the BIGINT round trip (real Postgres)", () => {
   it("returns the stored event start unchanged, not merely a number", async () => {
     const loaded = await roundTrip({
@@ -208,7 +202,7 @@ describe("the stored event start survives the BIGINT round trip (real Postgres)"
   });
 
   it("returns the largest storable event start unchanged", async () => {
-    // calculateRefund admits any finite eventStartMs (src/refund.ts:32); this is the
+    // calculateRefund admits any finite eventStartMs (src/refund.ts:42); this is the
     // largest one that BIGINT -> Number can still represent without rounding.
     const loaded = await roundTrip({
       totalCents: 10_000,

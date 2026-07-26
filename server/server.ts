@@ -10,6 +10,10 @@ const PORT = Number(process.env.PORT ?? 4173);
 // produces a sub-50-cent order, which leaves the seat-release condition below
 // indistinguishable from `refundCents > 0`.
 const PRICE_CENTS = Number(process.env.PRICE_CENTS ?? 5000);
+// Both request bodies are a single small JSON object, so this is enormously
+// generous. It is set well under V8's ~512MB max string length so the refusal
+// is a clean 400 rather than a RangeError from the concatenation itself.
+const MAX_BODY_CHARS = 64 * 1024 * 1024;
 const event: Event = {
   id: "rockfest",
   name: "RockFest 2026",
@@ -56,10 +60,23 @@ createServer(async (req, res) => {
     return;
   }
   if (req.method === "POST" && (req.url === "/api/book" || req.url === "/api/refund")) {
-    let body = "";
-    for await (const chunk of req) body += chunk;
-    const data = JSON.parse(body || "{}");
     try {
+      // EVERYTHING that can throw lives inside this try, the body read included.
+      // `for await` is itself an await on a stream, and that stream rejects when
+      // a client disconnects mid-request — a phone leaving a tunnel, a closed
+      // tab, a load-balancer idle timeout. It needs no malice and no bad bytes.
+      // Outside the try, in an async handler, nothing catches that rejection and
+      // the process exits, taking every in-memory order and the seat count with
+      // it. `JSON.parse` on the line below is the same hazard, one step later.
+      let body = "";
+      for await (const chunk of req) {
+        body += chunk;
+        // Refuse oversized bodies rather than accumulating them. Uncapped, a
+        // big enough upload exhausts memory long before it throws, and past
+        // V8's max string length the concatenation itself fails.
+        if (body.length > MAX_BODY_CHARS) throw new RangeError("request body too large");
+      }
+      const data = JSON.parse(body || "{}");
       if (req.url === "/api/book") {
         const order = bookTickets(event, data.tickets, groupDiscount(data.tickets));
         // Seats are only committed once the booking succeeded, so a rejected
@@ -89,7 +106,13 @@ createServer(async (req, res) => {
         res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ refundCents }));
       }
     } catch (e) {
-      res.writeHead(400, { "content-type": "application/json" }).end(JSON.stringify({ error: String(e) }));
+      // The client may already be gone — an aborted request is one of the ways
+      // we get here — so answering is best-effort. Writing to a socket that has
+      // been destroyed, or twice to one that already has headers, throws again,
+      // and a throw in here is outside the try that just caught the first one.
+      if (!res.headersSent && !res.destroyed) {
+        res.writeHead(400, { "content-type": "application/json" }).end(JSON.stringify({ error: String(e) }));
+      }
     }
     return;
   }

@@ -25,6 +25,11 @@ export function bookTickets(ev: Event, n: number, discountPercent = 0): Order {
   if (!Number.isFinite(ev.startMs)) throw new RangeError("event start out of range");
   if (n > seatsAvailable(ev)) throw new RangeError("not enough seats");
   const gross = ev.priceCents * n;
+  // Never sell an order the refund path would refuse. `calculateRefund` admits
+  // totals up to Number.MAX_SAFE_INTEGER, and a price this validator accepts can
+  // multiply past it — leaving a booking that is paid for and permanently
+  // unrefundable. Checking `gross` is enough: the discount only ever lowers it.
+  if (!Number.isSafeInteger(gross)) throw new RangeError("order total out of range");
   const total = Math.round(gross * (1 - discountPercent / 100));
   return { totalCents: total, tickets: n, discountPercent, eventStartMs: ev.startMs };
 }

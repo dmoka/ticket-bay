@@ -33,11 +33,20 @@ async function waitFor(url: string, timeoutMs = 30_000) {
   }
 }
 
-export async function startClockServer(appPort: number, controlPort: number): Promise<ClockServer> {
+/**
+ * `env` passes extra variables through to the real server — `PRICE_CENTS` is the
+ * one specs need, to build an order small enough that the minimum refund fee
+ * swallows it whole. The server already reads it; nothing is stubbed.
+ */
+export async function startClockServer(
+  appPort: number,
+  controlPort: number,
+  env: Record<string, string> = {},
+): Promise<ClockServer> {
   const control = `http://localhost:${controlPort}`;
   const child: ChildProcess = spawn("npx", ["tsx", "e2e/support/clock-server.ts"], {
     cwd: repoRoot,
-    env: { ...process.env, PORT: String(appPort), CONTROL_PORT: String(controlPort) },
+    env: { ...process.env, ...env, PORT: String(appPort), CONTROL_PORT: String(controlPort) },
     detached: true,
     stdio: "ignore",
   });
