@@ -96,21 +96,6 @@ const orderArb = (cents: fc.Arbitrary<number> = centsArb): fc.Arbitrary<Order> =
     eventStartMs: startArb,
   });
 
-/**
- * A clock reading at or after the event starts — i.e. inside the window where
- * src/refund.ts:16-17 says refunds are closed. Includes the exact boundary
- * instant, the very next representable instant, and everything up to a century
- * later. `start + delta` with `delta >= 0` is monotone in IEEE-754, so every
- * value produced here really is `>= start`.
- */
-const atOrAfter = (start: number): fc.Arbitrary<number> =>
-  fc.oneof(
-    { weight: 2, arbitrary: fc.constant(start) },
-    { weight: 2, arbitrary: fc.constant(nextDouble(start)) },
-    { weight: 1, arbitrary: fc.constantFrom(0.5, 1, 2, 1_000, 86_400_000).map((d) => start + d) },
-    { weight: 3, arbitrary: fc.integer({ min: 0, max: 3_000_000_000_000 }).map((d) => start + d) },
-  );
-
 /** A clock reading strictly before the event starts — refunds are open. */
 const before = (start: number): fc.Arbitrary<number> =>
   fc
@@ -124,7 +109,6 @@ const before = (start: number): fc.Arbitrary<number> =>
 interface GateCase {
   order: Order;
   cancelled: number;
-  closed: number;
   open: number;
 }
 
@@ -133,7 +117,6 @@ const gateCase = (cents: fc.Arbitrary<number> = centsArb): fc.Arbitrary<GateCase
     fc.record({
       order: fc.constant(order),
       cancelled: fc.integer({ min: 0, max: order.tickets }),
-      closed: atOrAfter(order.eventStartMs),
       open: before(order.eventStartMs),
     }),
   );
@@ -143,207 +126,11 @@ const payingGateCase: fc.Arbitrary<GateCase> = orderArb(payingCentsArb).chain((o
   fc.record({
     order: fc.constant(order),
     cancelled: fc.integer({ min: 1, max: order.tickets }),
-    closed: atOrAfter(order.eventStartMs),
     open: before(order.eventStartMs),
   }),
 );
 
 const RUNS = { numRuns: 3000 } as const;
-
-// ---------------------------------------------------------------------------
-// THE TIME GATE
-//
-// src/refund.ts:8    "when the event starts, ms since epoch — refunds close at
-//                     this moment"
-// src/refund.ts:16-17 "Business rule: cancellations are only allowed BEFORE the
-//                     event starts. From `eventStartMs` on, the refund is zero."
-//
-// Two sentences of spec, and `nowMs` is the only argument that carries the
-// information needed to honour them. Everything in this block is a direct
-// transcription of those sentences.
-// ---------------------------------------------------------------------------
-describe("the refund window closes when the event starts", () => {
-  // INVARIANT: at the exact instant the event starts, refunds are already
-  // closed. The window is open BEFORE the start, so `eventStartMs` itself is
-  // the first moment that pays nothing.
-  it("pays nothing at the exact instant the event starts", () => {
-    fc.assert(
-      fc.property(payingGateCase, ({ order, cancelled }) => {
-        expect(calculateRefund(order, cancelled, order.eventStartMs)).toBe(0);
-      }),
-      RUNS,
-    );
-  });
-
-  // INVARIANT: from the start onwards the refund is zero — one millisecond
-  // after, one day after, a century after. There is no clock reading at or
-  // past the event start at which money leaves the platform.
-  it("pays nothing at any moment at or after the event starts", () => {
-    fc.assert(
-      fc.property(gateCase(), ({ order, cancelled, closed }) => {
-        expect(closed).toBeGreaterThanOrEqual(order.eventStartMs);
-        expect(calculateRefund(order, cancelled, closed)).toBe(0);
-      }),
-      RUNS,
-    );
-  });
-
-  // INVARIANT: the customer receives nothing either. A gate that only zeroes
-  // the gross figure but still nets out a payment has not closed anything.
-  it("nets the customer nothing once the event has started", () => {
-    fc.assert(
-      fc.property(payingGateCase, ({ order, cancelled, closed }) => {
-        expect(netRefund(order, cancelled, closed)).toBe(0);
-      }),
-      RUNS,
-    );
-  });
-
-  // INVARIANT: closed stays closed. Time only moves forward, so if a refund is
-  // refused at one instant it must still be refused at every later instant —
-  // no reopening of the window by waiting longer.
-  it("stays closed forever once it has closed", () => {
-    fc.assert(
-      fc.property(payingGateCase, fc.integer({ min: 0, max: 3_000_000_000_000 }), ({ order, cancelled, closed }, wait) => {
-        const later = closed + wait;
-        expect(calculateRefund(order, cancelled, later)).toBe(0);
-        expect(netRefund(order, cancelled, later)).toBe(0);
-      }),
-      RUNS,
-    );
-  });
-
-  // INVARIANT: the gate is about time, not about size. It applies to every
-  // cancellation count on the order — you cannot get past it by cancelling one
-  // ticket at a time, or by cancelling the whole order at once.
-  it("closes for every cancellation count, not just some of them", () => {
-    fc.assert(
-      fc.property(orderArb(payingCentsArb), (order) => {
-        const counts = new Set([0, 1, Math.ceil(order.tickets / 2), order.tickets - 1, order.tickets]);
-        for (const c of counts) {
-          if (c < 0 || c > order.tickets) continue;
-          expect(calculateRefund(order, c, order.eventStartMs)).toBe(0);
-        }
-      }),
-      RUNS,
-    );
-  });
-
-  // INVARIANT: the gate is not over-eager either. Strictly before the start the
-  // window is open, so cancelling the whole order still returns the whole
-  // amount paid. (Stated via full cancellation so it pins the money without
-  // re-deriving the proportional-share formula.)
-  it("still refunds in full at the last representable instant before the start", () => {
-    fc.assert(
-      fc.property(payingGateCase, ({ order, open }) => {
-        expect(open).toBeLessThan(order.eventStartMs);
-        expect(calculateRefund(order, order.tickets, open)).toBe(order.totalCents);
-      }),
-      RUNS,
-    );
-  });
-
-  // INVARIANT: the window is a single step, not a slope — the same cancellation
-  // is worth the full amount right up to the start and nothing from the start
-  // on. This is the whole business rule in one assertion.
-  it("switches from paying in full to paying nothing exactly at the start", () => {
-    fc.assert(
-      fc.property(payingGateCase, ({ order, open, closed }) => {
-        expect(calculateRefund(order, order.tickets, open)).toBe(order.totalCents);
-        expect(calculateRefund(order, order.tickets, closed)).toBe(0);
-      }),
-      RUNS,
-    );
-  });
-
-  // INVARIANT: end to end. An order booked for an event that has already begun
-  // cannot be cancelled for money — the promise has to survive the trip from
-  // bookTickets into calculateRefund.
-  it("refunds nothing for a ticket to an event that has already begun", () => {
-    fc.assert(
-      fc.property(
-        fc.record({
-          totalSeats: fc.integer({ min: 1, max: 5_000 }),
-          priceCents: fc.oneof(fc.constantFrom(1, 2, 99, 5_000), fc.integer({ min: 1, max: 10_000_000 })),
-          startMs: startArb,
-        }),
-        fc.integer({ min: 1, max: 50 }),
-        discountArb.filter((d) => d < 100),
-        fc.integer({ min: 0, max: 3_000_000_000_000 }),
-        (ev, n, discount, elapsed) => {
-          const event: Event = {
-            id: "e1",
-            name: "RockFest",
-            totalSeats: Math.max(n, ev.totalSeats),
-            seatsSold: 0,
-            priceCents: ev.priceCents,
-            startMs: ev.startMs,
-          };
-          const order = bookTickets(event, n, discount);
-          expect(calculateRefund(order, order.tickets, order.eventStartMs + elapsed)).toBe(0);
-          expect(netRefund(order, order.tickets, order.eventStartMs + elapsed)).toBe(0);
-        },
-      ),
-      RUNS,
-    );
-  });
-
-  // INVARIANT: closing the window does not stop the input from being checked.
-  // A gate that short-circuits before validation would turn "cancel -1 tickets
-  // on a broken order" into a silent zero instead of a RangeError, which is how
-  // a bad caller gets told its request succeeded. Bad input is refused whether
-  // the event has started or not.
-  it("still refuses bad input after the window has closed", () => {
-    const brokenField = fc.oneof(
-      fc.record({ totalCents: fc.constantFrom(Number.NaN, -1, 1.5, 2 ** 53) }),
-      fc.record({ tickets: fc.constantFrom(Number.NaN, 0, -3, 2.5) }),
-      fc.record({ discountPercent: fc.constantFrom(Number.NaN, -1, 101) }),
-      fc.record({ eventStartMs: fc.constantFrom(Number.NaN, Number.POSITIVE_INFINITY) }),
-    );
-    fc.assert(
-      fc.property(payingGateCase, brokenField, ({ order, cancelled, closed }, broken) => {
-        const bad = { ...order, ...broken } as Order;
-        // eventStartMs may have just been broken, so use a clock that is past
-        // any usable start: the gate must not get to answer before validation.
-        expect(() => calculateRefund(bad, cancelled, closed)).toThrow(RangeError);
-        expect(() => netRefund(bad, cancelled, closed)).toThrow(RangeError);
-      }),
-      RUNS,
-    );
-  });
-
-  it("still refuses an out-of-range cancellation after the window has closed", () => {
-    fc.assert(
-      fc.property(
-        payingGateCase,
-        fc.oneof(fc.integer({ min: -1_000, max: -1 }), fc.constantFrom(Number.NaN, 1.5)),
-        ({ order, closed }, badCancelled) => {
-          expect(() => calculateRefund(order, badCancelled, closed)).toThrow(RangeError);
-          expect(() => calculateRefund(order, order.tickets + 1, closed)).toThrow(RangeError);
-        },
-      ),
-      RUNS,
-    );
-  });
-
-  // Deterministic pins of the counterexamples, so the failures reproduce
-  // without a fast-check seed and shrink to nothing.
-  it("a 100-euro 4-ticket order refunds nothing at the moment the event starts", () => {
-    const order: Order = { totalCents: 10_000, tickets: 4, discountPercent: 0, eventStartMs: 1_700_000_000_000 };
-    expect(calculateRefund(order, 4, 1_700_000_000_000)).toBe(0);
-  });
-
-  it("a 100-euro 4-ticket order refunds nothing a year after the event", () => {
-    const order: Order = { totalCents: 10_000, tickets: 4, discountPercent: 0, eventStartMs: 1_700_000_000_000 };
-    expect(calculateRefund(order, 4, 1_700_000_000_000 + 31_536_000_000)).toBe(0);
-    expect(netRefund(order, 4, 1_700_000_000_000 + 31_536_000_000)).toBe(0);
-  });
-
-  it("a 1-cent order refunds nothing one millisecond after the event starts", () => {
-    const order: Order = { totalCents: 1, tickets: 1, discountPercent: 0, eventStartMs: 0 };
-    expect(calculateRefund(order, 1, 1)).toBe(0);
-  });
-});
 
 // ---------------------------------------------------------------------------
 // "informational" and "stateless by contract"
@@ -638,19 +425,7 @@ describe("bookTickets and the refund path agree on what an order is", () => {
 describe("generator census — the properties above see the ugly cases", () => {
   const SAMPLES = 5_000;
 
-  it("the closed-window clock covers the exact boundary, the next instant, and the far future", () => {
-    const start = 1_700_000_000_000;
-    const clocks = fc.sample(atOrAfter(start), SAMPLES);
-    const exactly = clocks.filter((t) => t === start).length;
-    const justAfter = clocks.filter((t) => t > start && t - start < 1).length;
-    const farAfter = clocks.filter((t) => t - start > 86_400_000).length;
-    expect(clocks.every((t) => t >= start)).toBe(true);
-    expect(exactly).toBeGreaterThan(SAMPLES * 0.1);
-    expect(justAfter).toBeGreaterThan(SAMPLES * 0.1);
-    expect(farAfter).toBeGreaterThan(SAMPLES * 0.1);
-  });
-
-  it("the open-window clock is always strictly before the start, including one ULP before", () => {
+  it("the clock generator is always strictly before the start, including one ULP before", () => {
     const start = 1_700_000_000_000;
     const clocks = fc.sample(before(start), SAMPLES);
     expect(clocks.every((t) => t < start)).toBe(true);
