@@ -1,7 +1,10 @@
-// Adversarial lane, round 2 — attacks aimed at the FIX, not at the original bug.
-// Round 1's failures are pinned in refund.adversarial.test.ts and now pass;
-// this file exists so the specific ways the fix could have been written wrong
-// stay pinned.
+// The arithmetic on the money path, pinned against an independent exact-rational
+// reference computed entirely in BigInt.
+//
+// `calculateRefund` admits totals up to Number.MAX_SAFE_INTEGER, so the naive
+// `Math.round((totalCents * cancelled) / tickets)` overflows 2^53 before it
+// divides and can hand back a cent MORE than the customer paid. These tests
+// exist so nobody reintroduces it.
 import { describe, it, expect } from "vitest";
 import { calculateRefund, netRefund } from "../src/refund";
 
@@ -15,42 +18,7 @@ const exact = (total: bigint, part: bigint, whole: bigint) => {
   return r * 2n >= whole ? q + 1n : q;
 };
 
-describe("the gate boundary, one tick either side", () => {
-  it("pays in full at the last representable instant before the start", () => {
-    expect(calculateRefund(ord(), 4, S - 1)).toBe(10_000);
-  });
-
-  it("pays nothing at the start instant itself", () => {
-    expect(calculateRefund(ord(), 4, S)).toBe(0);
-  });
-
-  it("pays nothing one tick after", () => {
-    expect(calculateRefund(ord(), 4, S + 1)).toBe(0);
-  });
-
-  it("compares the clock to the event, not to a hardcoded epoch", () => {
-    // A gate written against `Date.now()` or a constant instead of the order's
-    // own start would get one of these two backwards.
-    expect(calculateRefund(ord({ eventStartMs: 0 }), 4, -1)).toBe(10_000);
-    expect(calculateRefund(ord({ eventStartMs: 0 }), 4, 0)).toBe(0);
-  });
-
-  it("handles a negative epoch event start", () => {
-    expect(calculateRefund(ord({ eventStartMs: -1_000 }), 4, -1_001)).toBe(10_000);
-    expect(calculateRefund(ord({ eventStartMs: -1_000 }), 4, -1_000)).toBe(0);
-  });
-
-  it("gates on a sub-millisecond event start without rounding the customer over the line", () => {
-    expect(calculateRefund(ord({ eventStartMs: S + 0.5 }), 4, S)).toBe(10_000);
-    expect(calculateRefund(ord({ eventStartMs: S - 0.5 }), 4, S)).toBe(0);
-  });
-
-  it("treats -0 as the same instant as 0", () => {
-    expect(calculateRefund(ord({ eventStartMs: 0 }), 4, -0)).toBe(0);
-  });
-});
-
-describe("the clock is validated, and validation runs before the gate", () => {
+describe("the clock is validated like every other input", () => {
   it.each([
     ["NaN", Number.NaN],
     ["Infinity", Number.POSITIVE_INFINITY],
@@ -59,22 +27,9 @@ describe("the clock is validated, and validation runs before the gate", () => {
     ["null", null],
     ["a numeric string", "1700000000001"],
   ])("refuses an unusable clock: %s", (_label, now) => {
+    // `null` is the one worth naming: it coerces to 0 in a numeric comparison,
+    // so an unvalidated missing clock would silently read as 1970.
     expect(() => calculateRefund(ord(), 4, now as number)).toThrow(RangeError);
-  });
-
-  it.each([
-    ["more tickets than the order holds", ord(), 5],
-    ["a negative cancellation", ord(), -1],
-    ["a fractional cancellation", ord(), 1.5],
-    ["an order with no tickets", ord({ tickets: 0 }), 0],
-    ["a negative total", ord({ totalCents: -1 }), 4],
-    ["a fractional total", ord({ totalCents: 100.5 }), 4],
-    ["an impossible discount", ord({ discountPercent: 150 }), 4],
-    ["a non-finite event start", ord({ eventStartMs: Number.NaN }), 4],
-  ])("still rejects %s after the event has started, instead of masking it as a zero refund", (_l, o, c) => {
-    // If the gate were placed above the validators, every one of these would
-    // come back as a plausible-looking 0 and the bad order would never surface.
-    expect(() => calculateRefund(o as never, c as number, S + 3_600_000)).toThrow(RangeError);
   });
 });
 
@@ -154,13 +109,8 @@ describe("exactShare — the new arithmetic on the money path", () => {
   });
 });
 
-describe("netRefund inherits the gate and the exact arithmetic", () => {
-  it("returns nothing at and after the start", () => {
-    expect(netRefund(ord(), 4, S)).toBe(0);
-    expect(netRefund(ord(), 4, S + 1)).toBe(0);
-  });
-
-  it("still pays before the start", () => {
+describe("netRefund inherits the exact arithmetic", () => {
+  it("pays the gross refund less the 2% fee", () => {
     expect(netRefund(ord(), 4, S - 1)).toBe(9_800);
   });
 

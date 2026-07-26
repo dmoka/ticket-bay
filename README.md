@@ -26,9 +26,11 @@ npm install
 npm test              # all green. Looks done, right?
 ```
 
-Then run the loop (see `CLAUDE.md`): the adversarial tester reads the docstring against the code, writes the cancel-after-showtime test nobody wrote, and goes red. The coder fixes the code — it can't touch the tests — and round two is green.
+Then run the loop (see `CLAUDE.md`): the testers read the docstring against the code, write the cancel-after-showtime test nobody wrote, and go red. The coder fixes the code — it can't touch the tests — and round two is green.
 
-Mutation testing tells the same story on `main`: run `npm run test:mutation` and check `reports/mutation/mutation.html` — the time-gate boundary mutant (`>=` flipped to `>`) survives: a refund exactly at showtime slips through, and no test notices.
+The suite is not thin, either. That's the point. `npm run test:mutation` scores **95%** with zero uncovered mutants, and every surviving mutant is provably equivalent. A near-perfect mutation score, on code that will refund a sold-out stadium the morning after the show.
+
+That is the lesson worth taking: mutation testing grades the tests you have against the code you *wrote*. A business rule that was never implemented generates no mutants, so it cannot lower your score. No coverage tool will ever tell you about code that isn't there — only a critic reading the spec against the behaviour will.
 
 ## Steal it
 

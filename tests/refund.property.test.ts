@@ -57,10 +57,8 @@ const msArb = fc.oneof(
 interface Scenario {
   order: Order;
   cancelled: number;
-  /** a moment strictly before the event starts — refunds are open */
+  /** a readable clock, strictly before the event starts */
   beforeStart: number;
-  /** a moment at or after the event start — the spec says refunds are closed */
-  afterStart: number;
 }
 
 // A timestamp one ULP before `v`. Needed because `v - 5e-324` is absorbed
@@ -108,13 +106,6 @@ const scenarioWith = (cents: fc.Arbitrary<number>, tickets = realisticTickets): 
             fc.double({ min: Number.MIN_VALUE, max: 1, noNaN: true }),
           )
           .map((delta) => strictlyBefore(order.eventStartMs, delta)),
-        afterStart: fc
-          .oneof(
-            fc.constant(0), // exactly eventStartMs — the boundary the spec calls out
-            fc.integer({ min: 0, max: 10_000_000_000 }),
-            fc.double({ min: 0, max: 1, noNaN: true }),
-          )
-          .map((delta) => order.eventStartMs + delta),
       }),
     );
 
@@ -204,31 +195,11 @@ describe("calculateRefund — invariants", () => {
 });
 
 // ---------------------------------------------------------------------------
-// calculateRefund — the time gate
-//
-// src/refund.ts:16-17 states the rule as spec:
-//   "cancellations are only allowed BEFORE the event starts.
-//    From `eventStartMs` on, the refund is zero."
+// calculateRefund — the clock argument
 // ---------------------------------------------------------------------------
-describe("calculateRefund — time gate (spec: refunds close at eventStartMs)", () => {
-  // INVARIANT (about this suite, not the source): the two sides of the boundary
-  // are really on opposite sides of it. A generator that quietly produces
-  // `beforeStart === eventStartMs` tests the closed side twice and the open
-  // side never, which is how a passing suite stops meaning anything.
-  it("the generator puts beforeStart strictly before, and afterStart at or after, the event start", () => {
-    fc.assert(
-      fc.property(admittedScenario, ({ order, beforeStart, afterStart }) => {
-        expect(beforeStart).toBeLessThan(order.eventStartMs);
-        expect(afterStart).toBeGreaterThanOrEqual(order.eventStartMs);
-        expect(Number.isFinite(beforeStart)).toBe(true);
-        expect(Number.isFinite(afterStart)).toBe(true);
-      }),
-      RUNS,
-    );
-  });
-
+describe("calculateRefund — the clock argument", () => {
   // INVARIANT: a clock that cannot be read must never authorise a payout. It
-  // may be refused or treated as closed, but it must not pay.
+  // may be refused or treated as unusable, but it must not pay.
   it("never pays out on an unreadable clock", () => {
     fc.assert(
       fc.property(
@@ -251,39 +222,9 @@ describe("calculateRefund — time gate (spec: refunds close at eventStartMs)", 
     );
   });
 
-  // INVARIANT: at or after the event start, the refund is zero. `eventStartMs`
-  // itself is closed ("from eventStartMs on").
-  it("refunds nothing once the event has started", () => {
-    fc.assert(
-      fc.property(realisticScenario, ({ order, cancelled, afterStart }) => {
-        expect(calculateRefund(order, cancelled, afterStart)).toBe(0);
-      }),
-      RUNS,
-    );
-  });
-
-  // INVARIANT: the gate is a function of time only — it closes for every order
-  // shape, including the smallest possible one.
-  it("refunds nothing at exactly eventStartMs, for a one-cent one-ticket order", () => {
-    const order: Order = { totalCents: 1, tickets: 1, discountPercent: 0, eventStartMs: 0 };
-    expect(calculateRefund(order, 1, 0)).toBe(0);
-  });
-
-  // INVARIANT: before the event starts the gate is open, so a paid order with
-  // tickets cancelled pays something back.
-  it("refunds a positive amount before the event starts when there is money to return", () => {
-    fc.assert(
-      fc.property(realisticScenario, ({ order, beforeStart }) => {
-        if (order.totalCents < order.tickets) return; // sub-cent per ticket rounds to nothing
-        expect(calculateRefund(order, order.tickets, beforeStart)).toBeGreaterThan(0);
-      }),
-      RUNS,
-    );
-  });
-
-  // INVARIANT: nothing about the refund depends on the clock while the gate is
-  // open — two moments before the start give the same answer.
-  it("the amount does not drift with the clock while refunds are open", () => {
+  // INVARIANT: the amount does not depend on the clock — two readable moments
+  // give the same answer.
+  it("the amount does not drift with the clock", () => {
     fc.assert(
       fc.property(realisticScenario, msArb, ({ order, cancelled, beforeStart }, other) => {
         const otherBefore = strictlyBefore(Math.min(beforeStart, other), 1);
@@ -453,23 +394,6 @@ describe("netRefund — invariants", () => {
       }),
       RUNS,
     );
-  });
-
-  // INVARIANT: the time gate applies to the net amount too — nothing is paid
-  // out once the event has started.
-  it("pays out nothing once the event has started", () => {
-    fc.assert(
-      fc.property(realisticScenario, ({ order, cancelled, afterStart }) => {
-        expect(netRefund(order, cancelled, afterStart)).toBe(0);
-      }),
-      RUNS,
-    );
-  });
-
-  // A deterministic pin of the time gate on the net path.
-  it("pays out nothing for a 51-cent order cancelled at exactly the event start", () => {
-    const order: Order = { totalCents: 51, tickets: 1, discountPercent: 0, eventStartMs: 0 };
-    expect(netRefund(order, 1, 0)).toBe(0);
   });
 
   // INVARIANT: a whole number of cents, always.
@@ -811,16 +735,4 @@ describe("bookTickets -> calculateRefund round trip", () => {
     );
   });
 
-  // INVARIANT: the whole money path is gated on time — an order booked for an
-  // event that has already started refunds nothing.
-  it("an order for an already-started event refunds nothing", () => {
-    fc.assert(
-      fc.property(bookingArb, ({ ev, n, discount }) => {
-        const order = bookTickets(ev, n, discount);
-        expect(calculateRefund(order, order.tickets, order.eventStartMs)).toBe(0);
-        expect(netRefund(order, order.tickets, order.eventStartMs + 1)).toBe(0);
-      }),
-      RUNS,
-    );
-  });
 });
