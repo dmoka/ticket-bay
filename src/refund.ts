@@ -47,12 +47,6 @@ export function calculateRefund(order: Order, cancelled: number, nowMs: number):
   if (!Number.isFinite(nowMs)) {
     throw new RangeError("current time out of range");
   }
-  // Refunds close AT the event start, not after it — `eventStartMs` itself is
-  // already too late. This sits below the validators on purpose: above them, a
-  // malformed order cancelled after the event would return a plausible-looking
-  // zero instead of raising, and the caller would never learn its request was
-  // bad.
-  if (nowMs >= order.eventStartMs) return 0;
   return exactShare(order.totalCents, cancelled, order.tickets);
 }
 

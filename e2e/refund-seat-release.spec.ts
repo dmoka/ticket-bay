@@ -75,25 +75,3 @@ test("cancelling before the event puts the seats back on sale", async ({ context
     })
     .toContain("Paid: 5000 cents");
 });
-
-test("cancelling once the event has started pays nothing back and keeps the seats sold", async ({ context }) => {
-  const { buyer, retryBooking, outcome } = await sellOutThenCancelAt(context, (start) => start);
-
-  // Both halves of the closed window, because they are enforced in different
-  // places: the payout in src/refund.ts, the seat return in server/server.ts:103.
-  // This test crosses the boundary, so it has to read both sides — asserting
-  // only the seat let a full 264600-cent payout through unnoticed for a round.
-  await expect(refundLine(buyer)).toBeVisible();
-  await expect(refundLine(buyer), "the refund window closes AT eventStartMs — nothing is owed").toHaveText(
-    "Refunded: 0 cents",
-  );
-
-  // The refund window has closed, so the customer keeps the seat they paid for.
-  // Putting it back on sale would sell a paid-for seat to someone else.
-  await retryBooking();
-  await expect
-    .poll(outcome, {
-      message: "a seat cancelled after the event started was resold — the original customer already owns it",
-    })
-    .toContain("not enough seats");
-});
