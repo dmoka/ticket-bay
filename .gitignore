@@ -4,3 +4,4 @@ reports/
 test-results/
 playwright-report/
 coverage/
+.claude/worktrees/

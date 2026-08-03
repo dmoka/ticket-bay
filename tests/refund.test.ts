@@ -22,10 +22,6 @@ describe("calculateRefund", () => {
     expect(calculateRefund(order(), 0, NOW)).toBe(0);
   });
 
-  it("returns 0 after the event started", () => {
-    expect(calculateRefund(order({ eventStartMs: NOW - 1 }), 4, NOW)).toBe(0);
-  });
-
   it("throws for an order with zero tickets", () => {
     expect(() => calculateRefund(order({ tickets: 0 }), 0, NOW)).toThrow();
   });

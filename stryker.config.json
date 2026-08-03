@@ -2,7 +2,16 @@
   "$schema": "https://raw.githubusercontent.com/stryker-mutator/stryker-js/master/packages/core/schema/stryker-schema.json",
   "packageManager": "npm",
   "testRunner": "vitest",
-  "mutate": ["src/**/*.ts"],
+  "mutate_comment": "orders-repo.ts is covered only by the integration lane, which vitest.config.ts excludes. Scoring it here publishes a 0.00% that reads as 'untested' when the truth is the opposite. It has its own config: npm run test:mutation:integration",
+  "mutate": ["src/**/*.ts", "!src/orders-repo.ts"],
+  "ignorePatterns_comment": "Keep generated artifacts out of the sandbox. Stryker copies the project file by file, so a concurrent Playwright run rewriting test-results/ crashes the copy with ENOENT. None of these are inputs to mutation testing.",
+  "ignorePatterns": [
+    "test-results",
+    "playwright-report",
+    "reports",
+    "coverage",
+    ".stryker-tmp"
+  ],
   "reporters": ["html", "clear-text", "progress"],
   "coverageAnalysis": "perTest"
 }

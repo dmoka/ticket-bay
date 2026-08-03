@@ -6,6 +6,7 @@
   "scripts": {
     "test": "vitest run",
     "test:mutation": "stryker run",
+    "test:mutation:integration": "stryker run stryker.integration.config.json",
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "test:ui": "playwright test",
     "dev": "tsx server/server.ts"
