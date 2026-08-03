@@ -47,6 +47,16 @@ export function calculateRefund(order: Order, cancelled: number, nowMs: number):
   if (!Number.isFinite(nowMs)) {
     throw new RangeError("current time out of range");
   }
+  // The window closes the instant the event starts, so `>=` and not `>`: at
+  // exactly `eventStartMs` nothing is owed. Gating here rather than in
+  // `netRefund` keeps the gross refund zero too — a closed window owes nothing
+  // before fees, not merely nothing after them. Out-of-range input still throws
+  // above: a closed window closes the money, it does not excuse a bad call.
+  // The complement of this test is `server/server.ts:103`, which returns seats
+  // to inventory only while `now < eventStartMs`. Both halves of one rule.
+  if (nowMs >= order.eventStartMs) {
+    return 0;
+  }
   return exactShare(order.totalCents, cancelled, order.tickets);
 }
 
@@ -68,7 +78,11 @@ function exactShare(total: number, part: number, whole: number): number {
 
 /** Fee kept by the platform on every refund, in cents. Min 50, 2% of refund. */
 export function refundFee(refundCents: number): number {
-  if (refundCents <= 0) return 0;
+  // An amount that is not a real number of cents must not fall through to a fee
+  // the platform keeps — the same rule the clock gets above. Without the finite
+  // check `NaN` slips past every comparison below and collects the 50-cent
+  // minimum, and `Infinity` collects an infinite fee.
+  if (!Number.isFinite(refundCents) || refundCents <= 0) return 0;
   const fee = Math.round(refundCents * 0.02);
   const floored = fee >= 50 ? fee : 50;
   return floored > refundCents ? refundCents : floored;
