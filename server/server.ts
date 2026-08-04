@@ -5,14 +5,9 @@ import { bookTickets, groupDiscount, Event } from "../src/booking";
 import { netRefund, Order } from "../src/refund";
 
 const PORT = Number(process.env.PORT ?? 4173);
-// Injectable so a test can build an order small enough that the minimum refund
-// fee swallows the whole refund. At the default 5000 no bookable quantity
-// produces a sub-50-cent order, which leaves the seat-release condition below
-// indistinguishable from `refundCents > 0`.
+// Injectable so tests can build an order small enough that the minimum fee swallows the refund.
 const PRICE_CENTS = Number(process.env.PRICE_CENTS ?? 5000);
-// Both request bodies are a single small JSON object, so this is enormously
-// generous. It is set well under V8's ~512MB max string length so the refusal
-// is a clean 400 rather than a RangeError from the concatenation itself.
+// Kept far under V8's max string length so refusal is a clean 400, not a RangeError.
 const MAX_BODY_CHARS = 64 * 1024 * 1024;
 const event: Event = {
   id: "rockfest",
@@ -61,26 +56,17 @@ createServer(async (req, res) => {
   }
   if (req.method === "POST" && (req.url === "/api/book" || req.url === "/api/refund")) {
     try {
-      // EVERYTHING that can throw lives inside this try, the body read included.
-      // `for await` is itself an await on a stream, and that stream rejects when
-      // a client disconnects mid-request — a phone leaving a tunnel, a closed
-      // tab, a load-balancer idle timeout. It needs no malice and no bad bytes.
-      // Outside the try, in an async handler, nothing catches that rejection and
-      // the process exits, taking every in-memory order and the seat count with
-      // it. `JSON.parse` on the line below is the same hazard, one step later.
+      // The body read stays inside the try: a client disconnect rejects the stream
+      // mid-`for await`, and unhandled that rejection kills the whole process.
       let body = "";
       for await (const chunk of req) {
         body += chunk;
-        // Refuse oversized bodies rather than accumulating them. Uncapped, a
-        // big enough upload exhausts memory long before it throws, and past
-        // V8's max string length the concatenation itself fails.
         if (body.length > MAX_BODY_CHARS) throw new RangeError("request body too large");
       }
       const data = JSON.parse(body || "{}");
       if (req.url === "/api/book") {
         const order = bookTickets(event, data.tickets, groupDiscount(data.tickets));
-        // Seats are only committed once the booking succeeded, so a rejected
-        // booking can never consume inventory.
+        // Commit seats only after the booking succeeded.
         event.seatsSold += order.tickets;
         const id = nextId++;
         orders.set(id, { order, refunded: false });
@@ -91,25 +77,18 @@ createServer(async (req, res) => {
         if (rec.refunded) throw new RangeError("order already refunded");
         const now = Date.now();
         const refundCents = netRefund(rec.order, rec.order.tickets, now);
-        // Flag rather than delete: the order still exists, it is just spent.
-        // Deleting made a second refund look like "no such order".
+        // Flag, don't delete: deleting made a second refund look like "no such order".
         rec.refunded = true;
-        // Seats come back only while refunds are still open. Once the event has
-        // started the customer keeps neither the money nor the seat, so putting
-        // it back on sale would sell a paid-for seat to someone else. Gate on
-        // the clock, not on `refundCents` — a pre-event cancellation whose
-        // refund is entirely absorbed by the minimum fee also returns 0, and
-        // those seats DO belong back in inventory.
+        // Gate seat-return on the clock, not on refundCents: a pre-event refund fully
+        // absorbed by the minimum fee returns 0, but those seats belong back on sale.
         if (now < rec.order.eventStartMs) {
           event.seatsSold -= rec.order.tickets;
         }
         res.writeHead(200, { "content-type": "application/json" }).end(JSON.stringify({ refundCents }));
       }
     } catch (e) {
-      // The client may already be gone — an aborted request is one of the ways
-      // we get here — so answering is best-effort. Writing to a socket that has
-      // been destroyed, or twice to one that already has headers, throws again,
-      // and a throw in here is outside the try that just caught the first one.
+      // Best-effort: the client may be gone, and writing to a destroyed socket
+      // (or twice to one with headers sent) throws outside this catch.
       if (!res.headersSent && !res.destroyed) {
         res.writeHead(400, { "content-type": "application/json" }).end(JSON.stringify({ error: String(e) }));
       }
