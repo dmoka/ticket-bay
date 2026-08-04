@@ -1,6 +1,6 @@
 # TicketBay — an AI Agent Testing Team You Can Steal
 
-A demo booking platform wired with a **team of five AI tester agents** for [Claude Code](https://claude.com/claude-code) — the "defense system" from my YouTube video on catching the bugs AI writes.
+A demo booking platform wired with a **team of five AI tester agents** for [Claude Code](https://claude.com/claude-code) — the "defense system" from [my YouTube video](https://youtu.be/0K-5p6SgjSM) on catching the bugs AI writes.
 
 AI writes code faster than you can review it. This repo shows the answer: don't review harder — **build a loop where independent agents test everything**, and the code isn't done until all of them come back green.
 
