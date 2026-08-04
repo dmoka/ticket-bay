@@ -36,7 +36,8 @@ That is the lesson worth taking: mutation testing grades the tests you have agai
 
 1. Copy `.claude/agents/` into any repo.
 2. Copy the loop rules from `CLAUDE.md` into yours.
-3. Ask Claude Code to run the testers after any change.
+3. The example attacks reference this repo's domain (money, refunds, ticket counts) on purpose — concrete examples make agents sharper than generic instructions. Swap them for your domain's equivalents: the attack *shapes* (boundaries, odd splits, degenerate inputs, the gap between code and tests) are what transfer.
+4. Ask Claude Code to run the testers after any change.
 
 That's the whole install.
 
