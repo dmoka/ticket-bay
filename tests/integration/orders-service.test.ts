@@ -213,4 +213,30 @@ describe("checkout", () => {
     expect(after.refundId).toMatch(/^re_/);
     expect(s.payments.getCharge(order.paymentId)?.refundedCents).toBe(9_800);
   });
+
+  it("normalizes the customer's email so My orders finds the order", async () => {
+    const s = shop();
+    const ev = venue(s.db);
+    const { order } = await s.book(ev.id, 1, { email: "  Fan@Example.COM " });
+    expect(order.customerEmail).toBe("fan@example.com");
+  });
+
+  it("refuses an unknown event", async () => {
+    const s = shop();
+    expect(await refused(s.book("no-such-event", 1))).toBe("Event not found.");
+  });
+
+  it("does not let two checkouts share the last use of a limited code", async () => {
+    const s = shop();
+    const ev = venue(s.db);
+    addCode(s.db, "LAST", 20, { maxUses: 1 });
+    // Both price with the code while one use is left; only one may commit it.
+    const results = await Promise.allSettled([s.book(ev.id, 1, { code: "LAST" }), s.book(ev.id, 1, { code: "LAST" })]);
+    expect(results.filter((r) => r.status === "fulfilled")).toHaveLength(1);
+    const lost = results.find((r) => r.status === "rejected") as PromiseRejectedResult;
+    expect(String(lost.reason)).toContain("fully redeemed");
+    expect(getCode(s.db, "LAST")!.uses).toBe(1);
+    // The losing checkout's charge was given back in full.
+    expect(getEvent(s.db, ev.id)!.seatsSold).toBe(41);
+  });
 });
