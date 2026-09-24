@@ -131,7 +131,7 @@ export default async function OrderPage({
           {order.status === "refunded" ? (
             <div className="space-y-1.5 text-[14px]">
               <p className="flex items-baseline justify-between font-medium" data-testid="refund-line">
-                <span>Refunded</span>
+                <span>Refunded</span>{" "}
                 <span className="font-mono tabular-nums" data-testid="refund-amount">
                   {money(order.refundCents ?? 0)}
                 </span>

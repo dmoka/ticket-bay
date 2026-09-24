@@ -48,7 +48,7 @@ export function CheckoutForm({
         <p className="text-[12px] text-muted-foreground">Test mode — the fake provider charges nothing real.</p>
       </div>
       {state.error && (
-        <div role="alert" className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-[13px] text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-400">
+        <div role="alert" data-testid="checkout-error" className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-[13px] text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-400">
           {state.error}
         </div>
       )}

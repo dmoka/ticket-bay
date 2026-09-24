@@ -35,7 +35,7 @@ function Line({
       className={cn("flex items-baseline justify-between gap-4 py-1", muted && "text-muted-foreground", strong && "font-medium")}
       data-testid={testId}
     >
-      <span className="min-w-0">{label}</span>
+      <span className="min-w-0">{label}</span>{" "}
       <span className="shrink-0 font-mono whitespace-nowrap tabular-nums">{value}</span>
     </div>
   );

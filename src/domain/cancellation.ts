@@ -21,7 +21,7 @@ export function previewCancellation(order: Order, nowMs: number): CancellationPr
   return {
     windowOpen,
     grossCents,
-    feeCents: grossCents === 0 ? 0 : grossCents - netCents,
+    feeCents: grossCents - netCents,
     netCents,
     releasesSeats: windowOpen,
   };

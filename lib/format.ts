@@ -1,12 +1,19 @@
 // Display formatting. Money arrives as integer cents and is only ever divided
 // here, at the edge, for display.
 
-const eur = new Intl.NumberFormat("en-IE", { style: "currency", currency: "EUR", minimumFractionDigits: 2 });
+const grouped = new Intl.NumberFormat("en-IE", { maximumFractionDigits: 0 });
 const eurShort = new Intl.NumberFormat("en-IE", { style: "currency", currency: "EUR", maximumFractionDigits: 0 });
 
-/** €1,234.50 */
+/**
+ * €1,234.50 — exact for every safe-integer amount. `cents / 100` in floating
+ * point is off by a cent near 2^53, so euros and cents are split with integer
+ * arithmetic instead.
+ */
 export function money(cents: number): string {
-  return eur.format(cents / 100);
+  const abs = Math.abs(cents);
+  const rest = abs % 100;
+  const euros = (abs - rest) / 100;
+  return `${cents < 0 ? "−" : ""}€${grouped.format(euros)}.${String(rest).padStart(2, "0")}`;
 }
 
 /** €1,235 — for KPI tiles and axes, where cents are noise. */
