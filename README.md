@@ -2,24 +2,34 @@
 
 The reference app for the **AI Agent Engineer** course: a small but real ticketing platform — storefront, checkout, order management and an ops dashboard — built so that AI coding agents have something worth breaking.
 
-- **Stack:** Next.js (App Router, server actions), TypeScript, SQLite via Drizzle ORM + better-sqlite3, shadcn/ui, Recharts.
+- **Stack:** Next.js (App Router, server actions), TypeScript, Postgres 17 via Drizzle ORM + node-postgres (`pg`), shadcn/ui, Recharts. Docker runs the database locally (docker-compose) and in tests (Testcontainers).
 - **Domain:** framework-free modules in `src/domain` — group discounts, early-bird, discount codes, service fee, VAT, and time-window refunds. Money is integer cents everywhere.
 - **Payments:** a fake, Stripe-shaped provider in `src/payments` (no network, idempotency keys). Configure it with `STRIPE_SECRET_KEY` — see `.env.example`.
 
 ## Run it
 
+Needs Node 22 and a running Docker.
+
 ```bash
-npm install && npm run db:migrate && npm run db:seed && npm run dev
+npm install && npm run db:up && npm run db:migrate && npm run db:seed && npm run dev
 ```
 
 Then open http://localhost:3000 (storefront) and http://localhost:3000/admin (dashboard). The seed creates 8 events, ~300 orders over the last 60 days and a demo customer: look up `alex.morgan@example.com` under **My orders**.
 
+`npm run db:up` starts Postgres 17 from `docker-compose.yml` (port 5432, named volume `ticketbay-pg`) and waits until it is healthy. Its local-only credentials and `DATABASE_URL` live in `.env.example`; the scripts read it when there is no `.env`. Copy it to `.env` to change anything. `npm run db:down` stops the database; `docker compose down -v` also deletes its data.
+
 | Command | What it runs |
 |---|---|
-| `npm test` | Vitest: domain unit + property tests, payments, SQLite integration tests |
-| `npm run test:ui` | Playwright money paths against a production build (own `data/e2e.db`) |
-| `npm run test:mutation` | Stryker on `src/domain` |
+| `npm test` | Vitest: domain unit + property tests, payments, and the integration tests against a real Postgres (Testcontainers starts one container for the run) |
+| `npm run test:unit` | The same minus the integration tests — no Docker needed |
+| `npm run test:integration` | Only the Postgres integration tests |
+| `npm run test:ui` | Playwright: the three critical money paths against a production build and its own Postgres container |
+| `npm run test:mutation` | Stryker on `src/domain` (unit lane) |
 | `npm run typecheck` / `npm run build` | `tsc --noEmit` / production build |
+
+**Test with real databases.** The integration lane never mocks the database. `tests/integration/global-setup.ts` starts one throwaway Postgres container per run and migrates a template database. Each test file clones its own database from that template, and every test starts from empty tables (`TRUNCATE`). The race tests open two real connections that commit and block on each other's row locks — which is why isolation is by truncation and not by a rolled-back transaction around each test.
+
+**Playwright for critical flows only.** `e2e/` holds three flows: booking with a discount code, a refund inside the window, and a refund refused once the event has started. Everything else is pinned faster one layer down.
 
 ## The testing team
 

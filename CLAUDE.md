@@ -28,9 +28,10 @@ Stryker refuse) reports **BLOCKED**, never green. Blocked is not a pass.
 
 ## Commands
 
-- `npm test` — run the test suite
-- `npm run test:mutation` — Stryker mutation testing (report: `reports/mutation/mutation.html`)
-- `npm run test:mutation:integration` — mutation testing for `src/orders-repo.ts`, which
-  only the integration lane covers. Needs Docker, runs at concurrency 1 on purpose, ~65s.
-- `npm run test:integration` — integration tests (Testcontainers; requires Docker)
-- `npm run test:ui` — Playwright flows
+- `npm test` — run the test suite (unit + Postgres integration; needs Docker)
+- `npm run test:unit` — domain, payments and formatting tests only (no Docker)
+- `npm run test:mutation` — Stryker mutation testing on `src/domain` (report: `reports/mutation/mutation.html`)
+- `npm run test:mutation:integration` — mutation testing for `src/db` and `src/services`, which
+  only the integration lane covers. Needs Docker, runs at concurrency 1 on purpose.
+- `npm run test:integration` — integration tests (Testcontainers Postgres; requires Docker)
+- `npm run test:ui` — Playwright flows (critical money paths only; Testcontainers Postgres)
