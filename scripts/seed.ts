@@ -5,6 +5,7 @@
 import { previewCancellation } from "../src/domain/cancellation";
 import { buildInvoice } from "../src/domain/invoice";
 import type { Event } from "../src/domain/booking";
+import { sql } from "drizzle-orm";
 import { databasePath, migrateDb, openDb } from "../src/db/client";
 import { discountCodes, events, orders } from "../src/db/schema";
 
@@ -300,6 +301,8 @@ db.transaction((tx) => {
   tx.delete(orders).run();
   tx.delete(discountCodes).run();
   tx.delete(events).run();
+  // Restart order numbers at TB-00001 on every reseed.
+  tx.run(sql`DELETE FROM sqlite_sequence WHERE name = 'orders'`);
   for (const e of EVENTS) {
     tx.insert(events)
       .values({

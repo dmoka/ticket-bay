@@ -101,7 +101,7 @@ export function getOverview(db: DbLike, nowMs: number, days: number): Overview {
   const recent = [...allOrders]
     .filter((o) => o.createdAtMs < nowMs)
     .sort((a, b) => b.createdAtMs - a.createdAtMs)
-    .slice(0, 7)
+    .slice(0, 5)
     .map((order) => ({ order, event: eventById.get(order.eventId)! }));
 
   return {
