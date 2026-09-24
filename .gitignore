@@ -11,7 +11,7 @@ coverage/
 next-env.d.ts
 *.tsbuildinfo
 
-# SQLite databases (created by npm run db:migrate / db:seed / the e2e suite)
+# Local scratch data (the Postgres data lives in the docker-compose volume)
 data/
 
 # Secrets — .env.example is the committed template

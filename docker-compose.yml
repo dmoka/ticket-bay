@@ -1,0 +1,22 @@
+# Local development database. `npm run db:up` starts it and waits until it is
+# healthy; `docker compose down` stops it (add -v to also delete the data).
+# Credentials come from .env.example (local-only values), overridden by .env.
+services:
+  postgres:
+    image: postgres:17
+    env_file:
+      - path: .env.example
+      - path: .env
+        required: false
+    ports:
+      - "5432:5432"
+    volumes:
+      - ticketbay-pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+volumes:
+  ticketbay-pg:
