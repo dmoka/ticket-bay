@@ -2,8 +2,14 @@
   "$schema": "https://raw.githubusercontent.com/stryker-mutator/stryker-js/master/packages/core/schema/stryker-schema.json",
   "packageManager": "npm",
   "testRunner": "vitest",
-  "mutate_comment": "Persistence and order use cases, killed by the SQLite integration lane (tests/integration). admin-queries.ts is a read model for the dashboard, not a money path.",
-  "mutate": ["src/db/**/*.ts", "src/services/**/*.ts", "!src/db/admin-queries.ts", "!src/db/schema.ts"],
+  "mutate_comment": "Persistence and order use cases, killed by the Postgres integration lane (tests/integration, Testcontainers — needs Docker). admin-queries.ts is a read model for the dashboard, not a money path. Concurrency 1: every Stryker worker runs the vitest global setup, so each would start its own Postgres container.",
+  "mutate": [
+    "src/db/**/*.ts",
+    "src/services/**/*.ts",
+    "!src/db/admin-queries.ts",
+    "!src/db/schema.ts"
+  ],
+  "concurrency": 1,
   "ignorePatterns_comment": "Generated artifacts are not inputs to mutation testing, and copying them into the sandbox races with any concurrent Playwright or reporter run.",
   "ignorePatterns": [
     "test-results",
@@ -14,7 +20,13 @@
     ".next",
     "data"
   ],
-  "reporters": ["html", "clear-text", "progress"],
-  "htmlReporter": { "fileName": "reports/mutation/integration.html" },
+  "reporters": [
+    "html",
+    "clear-text",
+    "progress"
+  ],
+  "htmlReporter": {
+    "fileName": "reports/mutation/integration.html"
+  },
   "coverageAnalysis": "perTest"
 }

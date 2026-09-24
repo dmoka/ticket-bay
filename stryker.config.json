@@ -2,8 +2,14 @@
   "$schema": "https://raw.githubusercontent.com/stryker-mutator/stryker-js/master/packages/core/schema/stryker-schema.json",
   "packageManager": "npm",
   "testRunner": "vitest",
+  "vitest_comment": "The unit lane only (tests/domain, tests/payments, tests/lib): no Postgres container per sandbox run, and nothing outside src/domain's tests can kill a domain mutant anyway.",
+  "vitest": {
+    "configFile": "vitest.unit.config.ts"
+  },
   "mutate_comment": "The framework-free domain: booking, refund, fees, invoice, pricing, cancellation. The persistence and service layers have their own config: npm run test:mutation:integration",
-  "mutate": ["src/domain/**/*.ts"],
+  "mutate": [
+    "src/domain/**/*.ts"
+  ],
   "ignorePatterns_comment": "Keep generated artifacts out of the sandbox. Stryker copies the project file by file, so a concurrent Playwright run rewriting test-results/ crashes the copy with ENOENT. None of these are inputs to mutation testing.",
   "ignorePatterns": [
     "test-results",
@@ -14,6 +20,10 @@
     ".next",
     "data"
   ],
-  "reporters": ["html", "clear-text", "progress"],
+  "reporters": [
+    "html",
+    "clear-text",
+    "progress"
+  ],
   "coverageAnalysis": "perTest"
 }
