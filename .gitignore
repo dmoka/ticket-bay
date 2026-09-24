@@ -5,3 +5,16 @@ test-results/
 playwright-report/
 coverage/
 .claude/worktrees/
+
+# Next.js
+.next/
+next-env.d.ts
+*.tsbuildinfo
+
+# SQLite databases (created by npm run db:migrate / db:seed / the e2e suite)
+data/
+
+# Secrets — .env.example is the committed template
+.env
+.env.*
+!.env.example
