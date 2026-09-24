@@ -2,6 +2,8 @@ import { defineConfig } from "vitest/config";
 
 export default defineConfig({
   test: {
+    // tests/domain (unit + property), tests/payments, and tests/integration
+    // (real SQLite, in-memory — fast enough to run on every `npm test`).
     // This list REPLACES vitest's built-in defaults, so every pattern has to be
     // spelled out. The globs are matched against the path from the root, hence
     // the leading `**/` — plain `node_modules/**` matches only the top level and
@@ -18,8 +20,9 @@ export default defineConfig({
       // the Stryker sandbox above: a tool writing a copy of the project into a
       // directory the test runner is happy to walk.
       "**/.claude/worktrees/**",
-      "tests/integration/**",
+      // Playwright specs run under their own runner (npm run test:ui).
       "e2e/**",
+      "**/.next/**",
     ],
   },
 });
