@@ -1,8 +1,29 @@
-# TicketBay — an AI Agent Testing Team You Can Steal
+# TicketBay
 
-A demo booking platform wired with a **team of five AI tester agents** for [Claude Code](https://claude.com/claude-code) — the "defense system" from [my YouTube video](https://youtu.be/0K-5p6SgjSM) on catching the bugs AI writes.
+The reference app for the **AI Agent Engineer** course: a small but real ticketing platform — storefront, checkout, order management and an ops dashboard — built so that AI coding agents have something worth breaking.
 
-AI writes code faster than you can review it. This repo shows the answer: don't review harder — **build a loop where independent agents test everything**, and the code isn't done until all of them come back green.
+- **Stack:** Next.js (App Router, server actions), TypeScript, SQLite via Drizzle ORM + better-sqlite3, shadcn/ui, Recharts.
+- **Domain:** framework-free modules in `src/domain` — group discounts, early-bird, discount codes, service fee, VAT, and time-window refunds. Money is integer cents everywhere.
+- **Payments:** a fake, Stripe-shaped provider in `src/payments` (no network, idempotency keys). Configure it with `STRIPE_SECRET_KEY` — see `.env.example`.
+
+## Run it
+
+```bash
+npm install && npm run db:migrate && npm run db:seed && npm run dev
+```
+
+Then open http://localhost:3000 (storefront) and http://localhost:3000/admin (dashboard). The seed creates 8 events, ~300 orders over the last 60 days and a demo customer: look up `alex.morgan@example.com` under **My orders**.
+
+| Command | What it runs |
+|---|---|
+| `npm test` | Vitest: domain unit + property tests, payments, SQLite integration tests |
+| `npm run test:ui` | Playwright money paths against a production build (own `data/e2e.db`) |
+| `npm run test:mutation` | Stryker on `src/domain` |
+| `npm run typecheck` / `npm run build` | `tsc --noEmit` / production build |
+
+## The testing team
+
+This repo is also wired with a **team of five AI tester agents** for [Claude Code](https://claude.com/claude-code) — the "defense system" from [my YouTube video](https://youtu.be/0K-5p6SgjSM) on catching the bugs AI writes. The agent definitions predate the Next.js rewrite and will be updated for it.
 
 ## The five testers (`.claude/agents/`)
 
