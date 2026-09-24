@@ -5,37 +5,41 @@ import { events, orders, type EventRow, type OrderRow } from "./schema";
 
 export type NewOrder = typeof orders.$inferInsert;
 
-export function insertOrder(db: DbLike, row: NewOrder): OrderRow {
-  // SQLite would store NaN as NULL and 1.5 as a REAL; the CHECK constraints
-  // catch the second, this catches both with an error that names the field.
+export async function insertOrder(db: DbLike, row: NewOrder): Promise<OrderRow> {
+  // Postgres refuses 1.5 in a BIGINT column, but only with a driver error that
+  // names no field, and a value past 2^53 would already have lost precision in
+  // JS. This catches fractions, NaN and unsafe integers with an error that
+  // names the field.
   for (const field of ["quantity", "subtotalCents", "discountCents", "ticketsCents", "feeCents", "totalCents", "vatCents"] as const) {
     if (!Number.isSafeInteger(row[field])) throw new RangeError(`${field} must be a safe integer`);
   }
-  return db.insert(orders).values(row).returning().get();
+  const [created] = await db.insert(orders).values(row).returning();
+  return created;
 }
 
-export function getOrder(db: DbLike, id: number): OrderRow | undefined {
-  return db.select().from(orders).where(eq(orders.id, id)).get();
+export async function getOrder(db: DbLike, id: number): Promise<OrderRow | undefined> {
+  const [row] = await db.select().from(orders).where(eq(orders.id, id));
+  return row;
 }
 
-export function getOrderWithEvent(db: DbLike, id: number): { order: OrderRow; event: EventRow } | undefined {
-  const r = db.select().from(orders).innerJoin(events, eq(orders.eventId, events.id)).where(eq(orders.id, id)).get();
+export async function getOrderWithEvent(db: DbLike, id: number): Promise<{ order: OrderRow; event: EventRow } | undefined> {
+  const [r] = await db.select().from(orders).innerJoin(events, eq(orders.eventId, events.id)).where(eq(orders.id, id));
   return r ? { order: r.orders, event: r.events } : undefined;
 }
 
-export function getOrderByIdempotencyKey(db: DbLike, key: string): OrderRow | undefined {
-  return db.select().from(orders).where(eq(orders.idempotencyKey, key)).get();
+export async function getOrderByIdempotencyKey(db: DbLike, key: string): Promise<OrderRow | undefined> {
+  const [row] = await db.select().from(orders).where(eq(orders.idempotencyKey, key));
+  return row;
 }
 
-export function listOrdersByEmail(db: DbLike, email: string): { order: OrderRow; event: EventRow }[] {
-  return db
+export async function listOrdersByEmail(db: DbLike, email: string): Promise<{ order: OrderRow; event: EventRow }[]> {
+  const rows = await db
     .select()
     .from(orders)
     .innerJoin(events, eq(orders.eventId, events.id))
     .where(eq(orders.customerEmail, email.trim().toLowerCase()))
-    .orderBy(desc(orders.createdAtMs))
-    .all()
-    .map((r) => ({ order: r.orders, event: r.events }));
+    .orderBy(desc(orders.createdAtMs));
+  return rows.map((r) => ({ order: r.orders, event: r.events }));
 }
 
 /**
@@ -61,10 +65,12 @@ export interface RefundRecord {
 /**
  * Mark an order refunded, exactly once. Returns true if this call performed the
  * refund, false if it had already been refunded (or does not exist). The guard
- * lives in the WHERE clause, so two callers cannot both win.
+ * lives in the WHERE clause, so two callers cannot both win: in Postgres the
+ * second UPDATE waits on the first one's row lock, then re-checks
+ * `status = 'paid'` against the committed row and matches nothing.
  */
-export function markRefunded(db: DbLike, id: number, r: RefundRecord): boolean {
-  const res = db
+export async function markRefunded(db: DbLike, id: number, r: RefundRecord): Promise<boolean> {
+  const res = await db
     .update(orders)
     .set({
       status: "refunded",
@@ -73,15 +79,14 @@ export function markRefunded(db: DbLike, id: number, r: RefundRecord): boolean {
       refundFeeCents: r.refundFeeCents,
       seatsReleased: r.seatsReleased,
     })
-    .where(and(eq(orders.id, id), eq(orders.status, "paid")))
-    .run();
-  return res.changes === 1;
+    .where(and(eq(orders.id, id), eq(orders.status, "paid")));
+  return res.rowCount === 1;
 }
 
-export function setRefundId(db: DbLike, id: number, refundId: string): void {
-  db.update(orders).set({ refundId }).where(eq(orders.id, id)).run();
+export async function setRefundId(db: DbLike, id: number, refundId: string): Promise<void> {
+  await db.update(orders).set({ refundId }).where(eq(orders.id, id));
 }
 
-export function isRefunded(db: DbLike, id: number): boolean {
-  return getOrder(db, id)?.status === "refunded";
+export async function isRefunded(db: DbLike, id: number): Promise<boolean> {
+  return (await getOrder(db, id))?.status === "refunded";
 }

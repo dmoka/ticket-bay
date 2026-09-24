@@ -11,7 +11,7 @@ export const metadata = { title: "Events" };
 
 export default async function AdminEvents() {
   const nowMs = await now();
-  const rows = listEventsAdmin(getDb());
+  const rows = await listEventsAdmin(getDb());
   const capacity = rows.reduce((s, r) => s + r.event.totalSeats, 0);
   const sold = rows.reduce((s, r) => s + r.event.seatsSold, 0);
 

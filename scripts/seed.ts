@@ -6,8 +6,9 @@ import { previewCancellation } from "../src/domain/cancellation";
 import { buildInvoice } from "../src/domain/invoice";
 import type { Event } from "../src/domain/booking";
 import { sql } from "drizzle-orm";
-import { databasePath, migrateDb, openDb } from "../src/db/client";
+import { closeDb, databaseUrl, migrateDb, openDb } from "../src/db/client";
 import { discountCodes, events, orders } from "../src/db/schema";
+import { loadLocalEnv } from "./local-env";
 
 const HOUR = 3_600_000;
 const DAY = 24 * HOUR;
@@ -187,8 +188,9 @@ interface Draft {
   customer: { name: string; email: string };
 }
 
-const db = openDb(databasePath());
-migrateDb(db);
+loadLocalEnv();
+const db = openDb(databaseUrl());
+await migrateDb(db);
 
 const startOf = (e: SeedEvent) => {
   const d = new Date(NOW + e.inDays * DAY);
@@ -297,37 +299,30 @@ for (const d of drafts) {
   rows.push(row);
 }
 
-db.transaction((tx) => {
-  tx.delete(orders).run();
-  tx.delete(discountCodes).run();
-  tx.delete(events).run();
-  // Restart order numbers at TB-00001 on every reseed.
-  tx.run(sql`DELETE FROM sqlite_sequence WHERE name = 'orders'`);
-  for (const e of EVENTS) {
-    tx.insert(events)
-      .values({
-        id: e.id,
-        name: e.name,
-        category: e.category,
-        venue: e.venue,
-        city: e.city,
-        description: e.description,
-        startsAtMs: startOf(e),
-        totalSeats: e.seats,
-        seatsSold: Math.min(e.seats, seatsSold.get(e.id) ?? 0),
-        priceCents: e.priceCents,
-        createdAtMs: NOW - 75 * DAY,
-      })
-      .run();
-  }
-  for (const c of CODES) {
-    tx.insert(discountCodes)
-      .values({ ...c, uses: codeUses.get(c.code) ?? 0, createdAtMs: NOW - 70 * DAY })
-      .run();
-  }
-  for (const r of rows) tx.insert(orders).values(r).run();
+await db.transaction(async (tx) => {
+  // RESTART IDENTITY: order numbers start again at TB-00001 on every reseed.
+  await tx.execute(sql`TRUNCATE ${orders}, ${discountCodes}, ${events} RESTART IDENTITY`);
+  await tx.insert(events).values(
+    EVENTS.map((e) => ({
+      id: e.id,
+      name: e.name,
+      category: e.category,
+      venue: e.venue,
+      city: e.city,
+      description: e.description,
+      startsAtMs: startOf(e),
+      totalSeats: e.seats,
+      seatsSold: Math.min(e.seats, seatsSold.get(e.id) ?? 0),
+      priceCents: e.priceCents,
+      createdAtMs: NOW - 75 * DAY,
+    })),
+  );
+  await tx.insert(discountCodes).values(CODES.map((c) => ({ ...c, uses: codeUses.get(c.code) ?? 0, createdAtMs: NOW - 70 * DAY })));
+  // In creation order, so order numbers follow the timeline.
+  await tx.insert(orders).values(rows);
 });
+await closeDb(db);
 
 const refunded = rows.filter((r) => r.status === "refunded").length;
-console.log(`seeded ${databasePath()}: ${EVENTS.length} events, ${rows.length} orders (${refunded} refunded), ${CODES.length} discount codes`);
+console.log(`seeded ${new URL(databaseUrl()).pathname.slice(1)}: ${EVENTS.length} events, ${rows.length} orders (${refunded} refunded), ${CODES.length} discount codes`);
 console.log(`demo customer: ${DEMO_CUSTOMER.email}`);

@@ -23,7 +23,7 @@ export default async function OrderPage({
 }) {
   const id = Number((await params).id);
   const { placed } = await searchParams;
-  const found = Number.isSafeInteger(id) ? getOrderWithEvent(getDb(), id) : undefined;
+  const found = Number.isSafeInteger(id) ? await getOrderWithEvent(getDb(), id) : undefined;
   if (!found) notFound();
   const { order, event: ev } = found;
   const nowMs = await now();

@@ -12,7 +12,7 @@ export const metadata = { title: "Discount codes" };
 
 export default async function AdminCodes() {
   const nowMs = await now();
-  const rows = listCodesAdmin(getDb());
+  const rows = await listCodesAdmin(getDb());
   return (
     <>
       <PageHeader title="Discount codes" description="Codes stack with group and early-bird discounts; the combined discount is capped at 100%." />

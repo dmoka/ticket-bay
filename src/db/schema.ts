@@ -1,10 +1,17 @@
 import { sql } from "drizzle-orm";
-import { check, index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { bigint, boolean, check, index, integer, pgTable, text } from "drizzle-orm/pg-core";
 
-// Money is INTEGER cents everywhere. Instants are INTEGER ms since epoch.
-// No REAL columns: a float in a money path is a bug waiting for a total.
+// Money is integer cents everywhere. Instants are integer ms since epoch.
+// No numeric/real columns: a float in a money path is a bug waiting for a total.
+//
+// Cents and instants are BIGINT: an epoch in ms (1.8e12) and the largest total
+// the refund module admits (Number.MAX_SAFE_INTEGER) both overflow INTEGER.
+// `mode: "number"` hands them to JS as numbers, not strings — safe because
+// every amount the app writes is checked with Number.isSafeInteger first.
+const cents = (name: string) => bigint(name, { mode: "number" });
+const instant = (name: string) => bigint(name, { mode: "number" });
 
-export const events = sqliteTable(
+export const events = pgTable(
   "events",
   {
     id: text("id").primaryKey(),
@@ -13,67 +20,65 @@ export const events = sqliteTable(
     venue: text("venue").notNull(),
     city: text("city").notNull(),
     description: text("description").notNull().default(""),
-    startsAtMs: integer("starts_at_ms").notNull(),
+    startsAtMs: instant("starts_at_ms").notNull(),
     totalSeats: integer("total_seats").notNull(),
     seatsSold: integer("seats_sold").notNull().default(0),
-    priceCents: integer("price_cents").notNull(),
-    createdAtMs: integer("created_at_ms").notNull(),
+    priceCents: cents("price_cents").notNull(),
+    createdAtMs: instant("created_at_ms").notNull(),
   },
   (t) => [
     check("events_seats_in_range", sql`${t.seatsSold} >= 0 AND ${t.seatsSold} <= ${t.totalSeats}`),
     check("events_price_non_negative", sql`${t.priceCents} >= 0`),
-    // SQLite's INTEGER affinity quietly keeps 12.5 as a REAL. Refuse it.
-    check("events_integer_money", sql`typeof(${t.priceCents}) = 'integer' AND typeof(${t.startsAtMs}) = 'integer'`),
   ],
 );
 
-export const discountCodes = sqliteTable(
+export const discountCodes = pgTable(
   "discount_codes",
   {
     code: text("code").primaryKey(),
     percent: integer("percent").notNull(),
-    active: integer("active", { mode: "boolean" }).notNull().default(true),
+    active: boolean("active").notNull().default(true),
     maxUses: integer("max_uses"),
     uses: integer("uses").notNull().default(0),
-    expiresAtMs: integer("expires_at_ms"),
-    createdAtMs: integer("created_at_ms").notNull(),
+    expiresAtMs: instant("expires_at_ms"),
+    createdAtMs: instant("created_at_ms").notNull(),
   },
   (t) => [check("discount_codes_percent_range", sql`${t.percent} BETWEEN 1 AND 100`)],
 );
 
-export const orders = sqliteTable(
+export const orders = pgTable(
   "orders",
   {
-    id: integer("id").primaryKey({ autoIncrement: true }),
+    id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
     eventId: text("event_id")
       .notNull()
       .references(() => events.id),
     customerEmail: text("customer_email").notNull(),
     customerName: text("customer_name").notNull(),
     quantity: integer("quantity").notNull(),
-    subtotalCents: integer("subtotal_cents").notNull(),
+    subtotalCents: cents("subtotal_cents").notNull(),
     discountPercent: integer("discount_percent").notNull(),
     groupPercent: integer("group_percent").notNull().default(0),
     earlyBirdPercent: integer("early_bird_percent").notNull().default(0),
     codePercent: integer("code_percent").notNull().default(0),
     discountCode: text("discount_code").references(() => discountCodes.code),
-    discountCents: integer("discount_cents").notNull(),
+    discountCents: cents("discount_cents").notNull(),
     /** discounted ticket amount — the refundable part of the order */
-    ticketsCents: integer("tickets_cents").notNull(),
-    feeCents: integer("fee_cents").notNull(),
+    ticketsCents: cents("tickets_cents").notNull(),
+    feeCents: cents("fee_cents").notNull(),
     /** what was charged: ticketsCents + feeCents */
-    totalCents: integer("total_cents").notNull(),
-    vatCents: integer("vat_cents").notNull(),
+    totalCents: cents("total_cents").notNull(),
+    vatCents: cents("vat_cents").notNull(),
     status: text("status", { enum: ["paid", "refunded"] }).notNull().default("paid"),
     paymentId: text("payment_id").notNull(),
     idempotencyKey: text("idempotency_key").notNull().unique(),
-    createdAtMs: integer("created_at_ms").notNull(),
-    refundedAtMs: integer("refunded_at_ms"),
+    createdAtMs: instant("created_at_ms").notNull(),
+    refundedAtMs: instant("refunded_at_ms"),
     /** net amount returned to the customer */
-    refundCents: integer("refund_cents"),
+    refundCents: cents("refund_cents"),
     /** fee kept by the platform on the refund */
-    refundFeeCents: integer("refund_fee_cents"),
-    seatsReleased: integer("seats_released", { mode: "boolean" }),
+    refundFeeCents: cents("refund_fee_cents"),
+    seatsReleased: boolean("seats_released"),
     refundId: text("refund_id"),
   },
   (t) => [
@@ -82,10 +87,6 @@ export const orders = sqliteTable(
     index("orders_created_idx").on(t.createdAtMs),
     check("orders_quantity_positive", sql`${t.quantity} > 0`),
     check("orders_money_non_negative", sql`${t.ticketsCents} >= 0 AND ${t.totalCents} >= 0`),
-    check(
-      "orders_integer_money",
-      sql`typeof(${t.subtotalCents}) = 'integer' AND typeof(${t.discountCents}) = 'integer' AND typeof(${t.ticketsCents}) = 'integer' AND typeof(${t.feeCents}) = 'integer' AND typeof(${t.totalCents}) = 'integer' AND typeof(${t.vatCents}) = 'integer' AND (${t.refundCents} IS NULL OR typeof(${t.refundCents}) = 'integer')`,
-    ),
     check("orders_refund_not_above_paid", sql`${t.refundCents} IS NULL OR ${t.refundCents} <= ${t.ticketsCents}`),
   ],
 );

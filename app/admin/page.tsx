@@ -16,7 +16,7 @@ export const metadata = { title: "Overview" };
 export default async function AdminOverview({ searchParams }: { searchParams: Promise<{ t?: string }> }) {
   const days = parseTimeframe((await searchParams).t);
   const nowMs = await now();
-  const o = getOverview(getDb(), nowMs, days);
+  const o = await getOverview(getDb(), nowMs, days);
 
   const kpis = [
     { label: "Revenue", value: moneyShort(o.revenue.cur), kpi: o.revenue, delta: <Delta cur={o.revenue.cur} prev={o.revenue.prev} /> },

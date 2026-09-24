@@ -14,13 +14,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
-  const ev = getEvent(getDb(), (await params).id);
+  const ev = await getEvent(getDb(), (await params).id);
   return { title: ev?.name ?? "Event" };
 }
 
 export default async function EventPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const ev = getEvent(getDb(), id);
+  const ev = await getEvent(getDb(), id);
   if (!ev) notFound();
   const nowMs = await now();
   const status = eventStatus(ev, nowMs);

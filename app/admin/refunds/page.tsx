@@ -9,7 +9,7 @@ import { cn } from "@/lib/utils";
 export const metadata = { title: "Refunds" };
 
 export default async function AdminRefunds() {
-  const rows = listRefunds(getDb());
+  const rows = await listRefunds(getDb());
   const refunded = rows.reduce((s, r) => s + (r.order.refundCents ?? 0), 0);
   const fees = rows.reduce((s, r) => s + (r.order.refundFeeCents ?? 0), 0);
   const late = rows.filter((r) => !r.order.seatsReleased).length;

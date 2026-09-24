@@ -1,49 +1,41 @@
-import fs from "node:fs";
 import path from "node:path";
-import Database from "better-sqlite3";
-import { drizzle, type BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
-import { migrate } from "drizzle-orm/better-sqlite3/migrator";
+import { Pool } from "pg";
+import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
+import { migrate } from "drizzle-orm/node-postgres/migrator";
 import * as schema from "./schema";
 
-export type Db = BetterSQLite3Database<typeof schema> & { $client: Database.Database };
+export type Db = NodePgDatabase<typeof schema> & { $client: Pool };
 /** A transaction handle — same query API as `Db`, scoped to one transaction. */
 export type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];
 /** Anything repository functions can run against. */
 export type DbLike = Db | Tx;
 
-export const DEFAULT_DATABASE_PATH = "data/ticketbay.db";
 const MIGRATIONS_FOLDER = path.join(process.cwd(), "drizzle");
 
-/** Opens (and creates, if needed) a SQLite database file or `:memory:`. */
-export function openDb(file: string): Db {
-  if (file !== ":memory:") fs.mkdirSync(path.dirname(path.resolve(file)), { recursive: true });
-  const sqlite = new Database(file);
-  sqlite.pragma("journal_mode = WAL");
-  sqlite.pragma("foreign_keys = ON");
-  // The app server, the seed script and the e2e suite can hold the file at once.
-  sqlite.pragma("busy_timeout = 5000");
-  return drizzle(sqlite, { schema });
+/** A connection pool over one Postgres database. Close it with `closeDb`. */
+export function openDb(url: string): Db {
+  return drizzle(new Pool({ connectionString: url }), { schema });
 }
 
-export function migrateDb(db: Db): void {
-  migrate(db, { migrationsFolder: MIGRATIONS_FOLDER });
+export async function closeDb(db: Db): Promise<void> {
+  await db.$client.end();
 }
 
-/** A fresh, fully migrated in-memory database. For tests. */
-export function createMemoryDb(): Db {
-  const db = openDb(":memory:");
-  migrateDb(db);
-  return db;
+/** Applies the committed migrations in drizzle/. Safe to run twice. */
+export async function migrateDb(db: Db): Promise<void> {
+  await migrate(db, { migrationsFolder: MIGRATIONS_FOLDER });
 }
 
-export function databasePath(env: NodeJS.ProcessEnv = process.env): string {
-  return env.DATABASE_PATH || DEFAULT_DATABASE_PATH;
+export function databaseUrl(env: NodeJS.ProcessEnv = process.env): string {
+  const url = env.DATABASE_URL;
+  if (!url) throw new Error("DATABASE_URL is not set. Copy .env.example to .env, then run `npm run db:up`.");
+  return url;
 }
 
 const globalForDb = globalThis as unknown as { __ticketbayDb?: Db };
 
-/** The app's shared connection. One per process, survives dev hot reloads. */
+/** The app's shared pool. One per process, survives dev hot reloads. */
 export function getDb(): Db {
-  if (!globalForDb.__ticketbayDb) globalForDb.__ticketbayDb = openDb(databasePath());
+  if (!globalForDb.__ticketbayDb) globalForDb.__ticketbayDb = openDb(databaseUrl());
   return globalForDb.__ticketbayDb;
 }

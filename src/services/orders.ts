@@ -6,8 +6,8 @@ import { previewCancellation } from "../domain/cancellation";
 import { checkDiscountCode, normalizeCode, quote, type CodeCheck } from "../domain/pricing";
 import type { Invoice } from "../domain/invoice";
 import type { Db } from "../db/client";
-import { getCode, incrementUses, toDomainCode } from "../db/codes-repo";
-import { adjustSeatsSold, getEvent, toDomainEvent } from "../db/events-repo";
+import { getCode, getCodeForUpdate, incrementUses, toDomainCode } from "../db/codes-repo";
+import { adjustSeatsSold, getEvent, getEventForUpdate, toDomainEvent } from "../db/events-repo";
 import {
   getOrderByIdempotencyKey,
   getOrderWithEvent,
@@ -55,18 +55,18 @@ export interface QuoteResult {
 }
 
 /** Whether a code the customer typed applies right now. */
-export function checkCode(deps: Pick<Deps, "db" | "nowMs">, rawCode: string): CodeCheck {
-  const found = getCode(deps.db, normalizeCode(rawCode));
+export async function checkCode(deps: Pick<Deps, "db" | "nowMs">, rawCode: string): Promise<CodeCheck> {
+  const found = await getCode(deps.db, normalizeCode(rawCode));
   return checkDiscountCode(rawCode, found && toDomainCode(found), deps.nowMs);
 }
 
 /** Price a prospective order. Throws OrderError with a customer-facing reason. */
-export function quoteOrder(deps: Pick<Deps, "db" | "nowMs">, eventId: string, quantity: number, rawCode = ""): QuoteResult {
-  const ev = getEvent(deps.db, eventId);
+export async function quoteOrder(deps: Pick<Deps, "db" | "nowMs">, eventId: string, quantity: number, rawCode = ""): Promise<QuoteResult> {
+  const ev = await getEvent(deps.db, eventId);
   if (!ev) throw new OrderError("Event not found.");
   let code: QuoteResult["code"] = null;
   if (rawCode.trim()) {
-    const check = checkCode(deps, rawCode);
+    const check = await checkCode(deps, rawCode);
     if (!check.ok) throw new OrderError(check.reason);
     code = { code: check.code, percent: check.percent };
   }
@@ -89,7 +89,7 @@ export interface PlaceOrderInput {
 
 export async function placeOrder(deps: Deps, input: PlaceOrderInput): Promise<{ order: OrderRow; replayed: boolean }> {
   const { db, payments, nowMs } = deps;
-  const previous = getOrderByIdempotencyKey(db, input.idempotencyKey);
+  const previous = await getOrderByIdempotencyKey(db, input.idempotencyKey);
   if (previous) return { order: previous, replayed: true };
 
   const email = input.email.trim().toLowerCase();
@@ -97,8 +97,8 @@ export async function placeOrder(deps: Deps, input: PlaceOrderInput): Promise<{ 
   if (!EMAIL.test(email)) throw new OrderError("Enter a valid email address.");
   if (!name) throw new OrderError("Enter the name for the tickets.");
 
-  const { invoice, code } = quoteOrder(deps, input.eventId, input.quantity, input.code);
-  const ev = getEvent(db, input.eventId)!;
+  const { invoice, code } = await quoteOrder(deps, input.eventId, input.quantity, input.code);
+  const ev = (await getEvent(db, input.eventId))!;
 
   const charge = await payments.charge({
     amountCents: invoice.totalCents,
@@ -108,22 +108,24 @@ export async function placeOrder(deps: Deps, input: PlaceOrderInput): Promise<{ 
   });
 
   try {
-    const order = db.transaction((tx) => {
+    const order = await db.transaction(async (tx) => {
       // Re-check against the row as it is NOW: another checkout may have taken
-      // the last seats while the card was being charged.
-      const fresh = getEvent(tx, input.eventId)!;
+      // the last seats while the card was being charged. The row lock makes a
+      // concurrent checkout for the same event wait here until this one commits.
+      const fresh = (await getEventForUpdate(tx, input.eventId))!;
       try {
         bookTickets(toDomainEvent(fresh), input.quantity);
       } catch (e) {
         describeRangeError(e, fresh);
       }
       if (code) {
-        const c = getCode(tx, code.code);
+        // Locked after the event, in every checkout: one lock order, no deadlock.
+        const c = await getCodeForUpdate(tx, code.code);
         const check = checkDiscountCode(code.code, c && toDomainCode(c), nowMs);
         if (!check.ok) throw new OrderError(check.reason);
-        incrementUses(tx, code.code);
+        await incrementUses(tx, code.code);
       }
-      adjustSeatsSold(tx, input.eventId, input.quantity);
+      await adjustSeatsSold(tx, input.eventId, input.quantity);
       return insertOrder(tx, {
         eventId: input.eventId,
         customerEmail: email,
@@ -168,27 +170,27 @@ export interface CancelResult {
  */
 export async function cancelOrder(deps: Deps, orderId: number): Promise<CancelResult> {
   const { db, payments, nowMs } = deps;
-  const result = db.transaction((tx) => {
-    const found = getOrderWithEvent(tx, orderId);
+  const result = await db.transaction(async (tx) => {
+    const found = await getOrderWithEvent(tx, orderId);
     if (!found) throw new OrderError("Order not found.");
     if (found.order.status === "refunded") throw new OrderError("This order has already been refunded.");
     const preview = previewCancellation(toDomainOrder(found.order, found.event), nowMs);
-    const won = markRefunded(tx, orderId, {
+    const won = await markRefunded(tx, orderId, {
       atMs: nowMs,
       refundCents: preview.netCents,
       refundFeeCents: preview.feeCents,
       seatsReleased: preview.releasesSeats,
     });
     if (!won) throw new OrderError("This order has already been refunded.");
-    if (preview.releasesSeats) adjustSeatsSold(tx, found.order.eventId, -found.order.quantity);
+    if (preview.releasesSeats) await adjustSeatsSold(tx, found.order.eventId, -found.order.quantity);
     return { paymentId: found.order.paymentId, preview };
   });
 
   if (result.preview.netCents > 0) {
     const refund = await payments.refund(result.paymentId, result.preview.netCents, `refund-${orderId}`);
-    setRefundId(db, orderId, refund.id);
+    await setRefundId(db, orderId, refund.id);
   }
-  const after = getOrderWithEvent(db, orderId)!;
+  const after = (await getOrderWithEvent(db, orderId))!;
   return {
     order: after.order,
     refundCents: result.preview.netCents,

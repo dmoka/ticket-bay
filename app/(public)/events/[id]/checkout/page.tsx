@@ -25,19 +25,19 @@ export default async function CheckoutPage({
   const { id } = await params;
   const sp = await searchParams;
   const db = getDb();
-  const ev = getEvent(db, id);
+  const ev = await getEvent(db, id);
   if (!ev) notFound();
   const nowMs = await now();
   const qty = Number(sp.qty ?? 1);
   const rawCode = (sp.code ?? "").trim();
 
-  const codeCheck = rawCode ? checkCode({ db, nowMs }, rawCode) : null;
+  const codeCheck = rawCode ? await checkCode({ db, nowMs }, rawCode) : null;
   const codeError = codeCheck && !codeCheck.ok ? codeCheck.reason : null;
   let result: QuoteResult | null = null;
   let error: string | null = null;
   try {
     // A bad code never blocks the order: quote without it and say why.
-    result = quoteOrder({ db, nowMs }, id, qty, codeCheck?.ok ? rawCode : "");
+    result = await quoteOrder({ db, nowMs }, id, qty, codeCheck?.ok ? rawCode : "");
   } catch (e) {
     if (!(e instanceof OrderError)) throw e;
     error = e.message;

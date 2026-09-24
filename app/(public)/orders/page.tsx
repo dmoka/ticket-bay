@@ -12,7 +12,7 @@ export const metadata = { title: "My orders" };
 export default async function MyOrdersPage({ searchParams }: { searchParams: Promise<{ email?: string }> }) {
   const sp = await searchParams;
   const email = (sp.email ?? (await cookies()).get("tb-email")?.value ?? "").trim().toLowerCase();
-  const rows = email ? listOrdersByEmail(getDb(), email) : [];
+  const rows = email ? await listOrdersByEmail(getDb(), email) : [];
 
   return (
     <div>

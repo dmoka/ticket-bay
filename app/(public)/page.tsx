@@ -56,7 +56,7 @@ function EventRowItem({ ev, nowMs }: { ev: EventRow; nowMs: number }) {
 
 export default async function EventsPage() {
   const nowMs = await now();
-  const all = listEvents(getDb());
+  const all = await listEvents(getDb());
   const upcoming = all.filter((e) => e.startsAtMs > nowMs);
   const past = all.filter((e) => e.startsAtMs <= nowMs).reverse();
 

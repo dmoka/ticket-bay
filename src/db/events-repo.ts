@@ -15,22 +15,34 @@ export function toDomainEvent(row: EventRow): Event {
   };
 }
 
-export function listEvents(db: DbLike): EventRow[] {
-  return db.select().from(events).orderBy(asc(events.startsAtMs)).all();
+export async function listEvents(db: DbLike): Promise<EventRow[]> {
+  return db.select().from(events).orderBy(asc(events.startsAtMs));
 }
 
-export function getEvent(db: DbLike, id: string): EventRow | undefined {
-  return db.select().from(events).where(eq(events.id, id)).get();
+export async function getEvent(db: DbLike, id: string): Promise<EventRow | undefined> {
+  const [row] = await db.select().from(events).where(eq(events.id, id));
+  return row;
 }
 
-export function createEvent(db: DbLike, row: NewEventRow): EventRow {
-  return db.insert(events).values(row).returning().get();
+/**
+ * Reads the event and holds its row lock until the transaction ends. Two
+ * checkouts for the same event queue up here, so the second one re-checks
+ * capacity against the first one's committed seat count.
+ */
+export async function getEventForUpdate(tx: DbLike, id: string): Promise<EventRow | undefined> {
+  const [row] = await tx.select().from(events).where(eq(events.id, id)).for("update");
+  return row;
+}
+
+export async function createEvent(db: DbLike, row: NewEventRow): Promise<EventRow> {
+  const [created] = await db.insert(events).values(row).returning();
+  return created;
 }
 
 /** Moves `delta` seats in or out of the sold count. The CHECK constraint refuses an oversell. */
-export function adjustSeatsSold(db: DbLike, id: string, delta: number): void {
-  db.update(events)
+export async function adjustSeatsSold(db: DbLike, id: string, delta: number): Promise<void> {
+  await db
+    .update(events)
     .set({ seatsSold: sql`${events.seatsSold} + ${delta}` })
-    .where(eq(events.id, id))
-    .run();
+    .where(eq(events.id, id));
 }

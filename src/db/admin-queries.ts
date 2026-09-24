@@ -1,7 +1,7 @@
 // Read models for the admin dashboard. The data set is small (hundreds of
 // orders), so aggregates are computed in plain TypeScript over one read —
 // easy to test, and every sum stays in integer cents.
-import { and, asc, desc, eq, like, or, sql, type SQL } from "drizzle-orm";
+import { and, asc, desc, eq, ilike, or, sql, type SQL } from "drizzle-orm";
 import type { DbLike } from "./client";
 import { discountCodes, events, orders, type DiscountCodeRow, type EventRow, type OrderRow } from "./schema";
 
@@ -61,9 +61,9 @@ function sellThroughAt(rows: OrderRow[], capacity: number, t: number): number {
   return capacity > 0 ? Math.round((held * 10_000) / capacity) : 0;
 }
 
-export function getOverview(db: DbLike, nowMs: number, days: number): Overview {
-  const allOrders = db.select().from(orders).all();
-  const allEvents = db.select().from(events).orderBy(asc(events.startsAtMs)).all();
+export async function getOverview(db: DbLike, nowMs: number, days: number): Promise<Overview> {
+  const allOrders = await db.select().from(orders);
+  const allEvents = await db.select().from(events).orderBy(asc(events.startsAtMs));
   const capacity = allEvents.reduce((s, e) => s + e.totalSeats, 0);
   const start = nowMs - days * DAY;
   const prevStart = start - days * DAY;
@@ -142,34 +142,33 @@ export interface EventAdminRow {
   refunds: number;
 }
 
-export function listEventsAdmin(db: DbLike): EventAdminRow[] {
-  const stats = db
+// Postgres returns SUM over BIGINT as NUMERIC and COUNT as BIGINT, both as
+// strings. Every aggregate is mapped back to a JS number here, in one place.
+const total = (expr: SQL) => sql<number>`coalesce(${expr}, 0)`.mapWith(Number);
+
+export async function listEventsAdmin(db: DbLike): Promise<EventAdminRow[]> {
+  const stats = await db
     .select({
       eventId: orders.eventId,
-      revenueCents: sql<number>`coalesce(sum(${orders.totalCents}), 0)`,
-      refundedCents: sql<number>`coalesce(sum(${orders.refundCents}), 0)`,
-      orders: sql<number>`count(*)`,
-      refunds: sql<number>`sum(case when ${orders.status} = 'refunded' then 1 else 0 end)`,
+      revenueCents: total(sql`sum(${orders.totalCents})`),
+      refundedCents: total(sql`sum(${orders.refundCents})`),
+      orders: total(sql`count(*)`),
+      refunds: total(sql`sum(case when ${orders.status} = 'refunded' then 1 else 0 end)`),
     })
     .from(orders)
-    .groupBy(orders.eventId)
-    .all();
+    .groupBy(orders.eventId);
   const byId = new Map(stats.map((s) => [s.eventId, s]));
-  return db
-    .select()
-    .from(events)
-    .orderBy(asc(events.startsAtMs))
-    .all()
-    .map((event) => {
-      const s = byId.get(event.id);
-      return {
-        event,
-        revenueCents: s?.revenueCents ?? 0,
-        refundedCents: s?.refundedCents ?? 0,
-        orders: s?.orders ?? 0,
-        refunds: s?.refunds ?? 0,
-      };
-    });
+  const rows = await db.select().from(events).orderBy(asc(events.startsAtMs));
+  return rows.map((event) => {
+    const s = byId.get(event.id);
+    return {
+      event,
+      revenueCents: s?.revenueCents ?? 0,
+      refundedCents: s?.refundedCents ?? 0,
+      orders: s?.orders ?? 0,
+      refunds: s?.refunds ?? 0,
+    };
+  });
 }
 
 export type OrderSort = "created" | "total" | "quantity" | "event";
@@ -183,42 +182,39 @@ export interface OrderFilter {
   offset?: number;
 }
 
-export function listOrdersAdmin(db: DbLike, f: OrderFilter): { rows: { order: OrderRow; event: EventRow }[]; total: number } {
+export async function listOrdersAdmin(db: DbLike, f: OrderFilter): Promise<{ rows: { order: OrderRow; event: EventRow }[]; total: number }> {
   const where: SQL[] = [];
   if (f.status) where.push(eq(orders.status, f.status));
   if (f.eventId) where.push(eq(orders.eventId, f.eventId));
   const q = f.q?.trim();
   if (q) {
     const idMatch = /^(?:TB-)?0*(\d+)$/i.exec(q);
-    const text = or(like(orders.customerEmail, `%${q.toLowerCase()}%`), like(orders.customerName, `%${q}%`))!;
+    const text = or(ilike(orders.customerEmail, `%${q}%`), ilike(orders.customerName, `%${q}%`))!;
     where.push(idMatch ? or(text, eq(orders.id, Number(idMatch[1])))! : text);
   }
   const cond = where.length ? and(...where) : undefined;
   const col = { created: orders.createdAtMs, total: orders.totalCents, quantity: orders.quantity, event: events.name }[f.sort ?? "created"];
   const order = f.dir === "asc" ? asc(col) : desc(col);
-  const rows = db
+  const rows = await db
     .select()
     .from(orders)
     .innerJoin(events, eq(orders.eventId, events.id))
     .where(cond)
     .orderBy(order, desc(orders.id))
     .limit(f.limit ?? 50)
-    .offset(f.offset ?? 0)
-    .all()
-    .map((r) => ({ order: r.orders, event: r.events }));
-  const total = db.select({ n: sql<number>`count(*)` }).from(orders).where(cond).get()?.n ?? 0;
-  return { rows, total };
+    .offset(f.offset ?? 0);
+  const [count] = await db.select({ n: total(sql`count(*)`) }).from(orders).where(cond);
+  return { rows: rows.map((r) => ({ order: r.orders, event: r.events })), total: count?.n ?? 0 };
 }
 
-export function listRefunds(db: DbLike): { order: OrderRow; event: EventRow }[] {
-  return db
+export async function listRefunds(db: DbLike): Promise<{ order: OrderRow; event: EventRow }[]> {
+  const rows = await db
     .select()
     .from(orders)
     .innerJoin(events, eq(orders.eventId, events.id))
     .where(eq(orders.status, "refunded"))
-    .orderBy(desc(orders.refundedAtMs))
-    .all()
-    .map((r) => ({ order: r.orders, event: r.events }));
+    .orderBy(desc(orders.refundedAtMs));
+  return rows.map((r) => ({ order: r.orders, event: r.events }));
 }
 
 export interface CodeAdminRow {
@@ -228,27 +224,23 @@ export interface CodeAdminRow {
   discountCents: number;
 }
 
-export function listCodesAdmin(db: DbLike): CodeAdminRow[] {
-  const stats = db
+export async function listCodesAdmin(db: DbLike): Promise<CodeAdminRow[]> {
+  const stats = await db
     .select({
       code: orders.discountCode,
-      orders: sql<number>`count(*)`,
-      revenueCents: sql<number>`coalesce(sum(${orders.totalCents}), 0)`,
+      orders: total(sql`count(*)`),
+      revenueCents: total(sql`sum(${orders.totalCents})`),
       // the code's own share of each order's discount, rounded per order
-      discountCents: sql<number>`coalesce(sum((${orders.subtotalCents} * ${orders.codePercent} + 50) / 100), 0)`,
+      // (BIGINT / INTEGER is integer division in Postgres)
+      discountCents: total(sql`sum((${orders.subtotalCents} * ${orders.codePercent} + 50) / 100)`),
     })
     .from(orders)
     .where(sql`${orders.discountCode} is not null`)
-    .groupBy(orders.discountCode)
-    .all();
+    .groupBy(orders.discountCode);
   const byCode = new Map(stats.map((s) => [s.code, s]));
-  return db
-    .select()
-    .from(discountCodes)
-    .orderBy(asc(discountCodes.code))
-    .all()
-    .map((code) => {
-      const s = byCode.get(code.code);
-      return { code, orders: s?.orders ?? 0, revenueCents: s?.revenueCents ?? 0, discountCents: s?.discountCents ?? 0 };
-    });
+  const rows = await db.select().from(discountCodes).orderBy(asc(discountCodes.code));
+  return rows.map((code) => {
+    const s = byCode.get(code.code);
+    return { code, orders: s?.orders ?? 0, revenueCents: s?.revenueCents ?? 0, discountCents: s?.discountCents ?? 0 };
+  });
 }

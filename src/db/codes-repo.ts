@@ -14,17 +14,24 @@ export function toDomainCode(row: DiscountCodeRow): DiscountCode {
   };
 }
 
-export function getCode(db: DbLike, code: string): DiscountCodeRow | undefined {
-  return db.select().from(discountCodes).where(eq(discountCodes.code, code)).get();
+export async function getCode(db: DbLike, code: string): Promise<DiscountCodeRow | undefined> {
+  const [row] = await db.select().from(discountCodes).where(eq(discountCodes.code, code));
+  return row;
 }
 
-export function listCodes(db: DbLike): DiscountCodeRow[] {
-  return db.select().from(discountCodes).orderBy(asc(discountCodes.code)).all();
+/** Reads the code and holds its row lock until the transaction ends: two checkouts cannot both spend its last use. */
+export async function getCodeForUpdate(tx: DbLike, code: string): Promise<DiscountCodeRow | undefined> {
+  const [row] = await tx.select().from(discountCodes).where(eq(discountCodes.code, code)).for("update");
+  return row;
 }
 
-export function incrementUses(db: DbLike, code: string): void {
-  db.update(discountCodes)
+export async function listCodes(db: DbLike): Promise<DiscountCodeRow[]> {
+  return db.select().from(discountCodes).orderBy(asc(discountCodes.code));
+}
+
+export async function incrementUses(db: DbLike, code: string): Promise<void> {
+  await db
+    .update(discountCodes)
     .set({ uses: sql`${discountCodes.uses} + 1` })
-    .where(eq(discountCodes.code, code))
-    .run();
+    .where(eq(discountCodes.code, code));
 }

@@ -19,7 +19,7 @@ export default async function AdminOrders({ searchParams }: { searchParams: Prom
   const sp = await searchParams;
   const db = getDb();
   const page = Math.max(1, Number(sp.page) || 1);
-  const { rows, total } = listOrdersAdmin(db, {
+  const { rows, total } = await listOrdersAdmin(db, {
     status: sp.status === "paid" || sp.status === "refunded" ? sp.status : undefined,
     eventId: sp.event || undefined,
     q: sp.q,
@@ -29,8 +29,8 @@ export default async function AdminOrders({ searchParams }: { searchParams: Prom
     offset: (page - 1) * PAGE_SIZE,
   });
   const peekId = Number(sp.peek);
-  const peek = Number.isSafeInteger(peekId) && peekId > 0 ? (getOrderWithEvent(db, peekId) ?? null) : null;
-  const events = listEvents(db).map((e) => ({ id: e.id, name: e.name }));
+  const peek = Number.isSafeInteger(peekId) && peekId > 0 ? ((await getOrderWithEvent(db, peekId)) ?? null) : null;
+  const events = (await listEvents(db)).map((e) => ({ id: e.id, name: e.name }));
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const link = (p: number) => {
     const next = new URLSearchParams(Object.entries(sp).filter(([k, v]) => v && k !== "peek") as [string, string][]);
