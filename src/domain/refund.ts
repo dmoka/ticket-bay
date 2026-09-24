@@ -46,7 +46,7 @@ export function calculateRefund(order: Order, cancelled: number, nowMs: number):
     throw new RangeError("current time out of range");
   }
   // `>=`: the window closes the instant the event starts. Mirrored in
-  // server/server.ts, which returns seats to inventory only while it's open.
+  // src/services/orders.ts, which returns seats to inventory only while it is open.
   if (nowMs >= order.eventStartMs) {
     return 0;
   }
