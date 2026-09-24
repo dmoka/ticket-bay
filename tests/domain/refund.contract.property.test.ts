@@ -1,4 +1,4 @@
-// Property-based suite for the promises src/refund.ts makes in prose.
+// Property-based suite for the promises src/domain/refund.ts makes in prose.
 //
 // The docstrings in src/ ARE the specification. This file walks them line by
 // line and encodes every rule they promise as a property — including the rules
@@ -11,8 +11,8 @@
 // without reading a line of TypeScript.
 import { describe, it, expect } from "vitest";
 import fc from "fast-check";
-import { calculateRefund, netRefund, Order } from "../src/refund";
-import { bookTickets, groupDiscount, seatsAvailable, Event } from "../src/booking";
+import { calculateRefund, netRefund, Order } from "../../src/domain/refund";
+import { bookTickets, groupDiscount, seatsAvailable, Event } from "../../src/domain/booking";
 
 // ---------------------------------------------------------------------------
 // Clock helpers.
@@ -118,8 +118,8 @@ const RUNS = { numRuns: 3000 } as const;
 // ---------------------------------------------------------------------------
 // "informational" and "stateless by contract"
 //
-// src/refund.ts:6  "percentage discount applied at purchase, 0-100 (informational)"
-// src/refund.ts:19 "Stateless by contract"
+// src/domain/refund.ts:6  "percentage discount applied at purchase, 0-100 (informational)"
+// src/domain/refund.ts:19 "Stateless by contract"
 // ---------------------------------------------------------------------------
 describe("the documented shape of the contract", () => {
   // INVARIANT: `discountPercent` is informational. `totalCents` is what was
@@ -157,14 +157,14 @@ describe("the documented shape of the contract", () => {
 // ---------------------------------------------------------------------------
 // booking feeds refunds
 //
-// src/booking.ts:18 "Book n tickets; returns the new order. Throws when not
+// src/domain/booking.ts:18 "Book n tickets; returns the new order. Throws when not
 //                    enough seats."
-// src/booking.ts:32 "Group discount tiers: 5+ tickets 5%, 10+ tickets 10%."
+// src/domain/booking.ts:32 "Group discount tiers: 5+ tickets 5%, 10+ tickets 10%."
 // ---------------------------------------------------------------------------
 describe("bookTickets and the refund path agree on what an order is", () => {
   /**
    * Every price bookTickets itself admits. Its own guard is
-   * `Number.isInteger(ev.priceCents) && ev.priceCents >= 0` (src/booking.ts:24),
+   * `Number.isInteger(ev.priceCents) && ev.priceCents >= 0` (src/domain/booking.ts:24),
    * so this generator emits nothing the function claims to reject.
    */
   const anyAdmittedPrice = fc.oneof(
@@ -274,7 +274,7 @@ describe("bookTickets and the refund path agree on what an order is", () => {
     );
   });
 
-  // INVARIANT (src/booking.ts:28-32): the refusal is exactly as wide as the
+  // INVARIANT (src/domain/booking.ts:28-32): the refusal is exactly as wide as the
   // problem. Booking declines when, and only when, the amount paid cannot be
   // represented — every order whose price times quantity fits in a Number is
   // still sold. Encoded against a BigInt oracle, so it does not restate the
@@ -298,7 +298,7 @@ describe("bookTickets and the refund path agree on what an order is", () => {
 
   // INVARIANT: booking never oversells. If it returned an order, the seats it
   // sold fit in the seats that were left — and if there were not enough seats
-  // it refused, which is the promise src/booking.ts:18 makes in so many words.
+  // it refused, which is the promise src/domain/booking.ts:18 makes in so many words.
   it("never sells more seats than the event has left", () => {
     let sold = 0;
     fc.assert(
@@ -322,7 +322,7 @@ describe("bookTickets and the refund path agree on what an order is", () => {
 
   // INVARIANT: what the order records as paid is list price times quantity, less
   // the discount. Checked against an exact rational in BigInt, so the oracle is
-  // independent of the float arithmetic in src/booking.ts:33.
+  // independent of the float arithmetic in src/domain/booking.ts:33.
   //
   // The tolerance is derived, not fitted: `gross * (1 - d/100)` rounds twice in
   // double precision, each step costing at most a relative Number.EPSILON, and
@@ -381,7 +381,7 @@ describe("bookTickets and the refund path agree on what an order is", () => {
     );
   });
 
-  // INVARIANT (src/booking.ts:32): the tiers are 0 / 5 / 10 and they only ever
+  // INVARIANT (src/domain/booking.ts:32): the tiers are 0 / 5 / 10 and they only ever
   // grow with the size of the group — a bigger group never gets a worse deal.
   it("group discounts are one of the three published tiers and never shrink", () => {
     fc.assert(

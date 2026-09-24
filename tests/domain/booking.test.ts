@@ -4,7 +4,7 @@
 // the seat/discount/price edges — last seat, 100% comp, free event — are
 // pinned as the legal cases they are, not left to inference.
 import { describe, it, expect } from "vitest";
-import { seatsAvailable, bookTickets, groupDiscount } from "../src/booking";
+import { seatsAvailable, bookTickets, groupDiscount } from "../../src/domain/booking";
 
 const ev = () => ({ id: "e1", name: "RockFest", totalSeats: 100, seatsSold: 40, priceCents: 5000, startMs: 2000000000000 });
 

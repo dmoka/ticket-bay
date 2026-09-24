@@ -6,17 +6,17 @@
 // tests/refund.rounding.property.test.ts each build their clock through a
 // `strictlyBefore(eventStartMs, delta)` helper, so every existing property runs
 // inside the OPEN refund window. The window closing is documented at
-// src/refund.ts:16-17 — "cancellations are only allowed BEFORE the event
+// src/domain/refund.ts:16-17 — "cancellations are only allowed BEFORE the event
 // starts. From `eventStartMs` on, the refund is zero" — and is exercised by no
 // property in the repo. Their ticket generators stop at 1_000 while the
-// validator at src/refund.ts:33 admits any positive integer.
+// validator at src/domain/refund.ts:33 admits any positive integer.
 //
 // These test INVARIANTS taken from that docstring and from what a refund means
 // as money, not the arithmetic in the implementation. Every invariant is stated
 // in English above the property that encodes it.
 import { describe, it, expect } from "vitest";
 import fc from "fast-check";
-import { calculateRefund, netRefund, refundFee, Order } from "../src/refund";
+import { calculateRefund, netRefund, refundFee, Order } from "../../src/domain/refund";
 
 // ---------------------------------------------------------------------------
 // Generators
@@ -126,7 +126,7 @@ const RUNS = { numRuns: 2000 } as const;
 // The refund window closes at the event start
 // ---------------------------------------------------------------------------
 describe("calculateRefund — the closed refund window", () => {
-  // INVARIANT (src/refund.ts:16-17): once the event has started, a cancellation
+  // INVARIANT (src/domain/refund.ts:16-17): once the event has started, a cancellation
   // buys nothing back. For any order, any number of cancelled tickets and any
   // readable clock at or after `eventStartMs`, the refund is exactly zero.
   it("refunds nothing once the event has started", () => {
@@ -306,7 +306,7 @@ describe("calculateRefund — the full range of ticket counts the validator admi
 // refundFee on amounts that are not a real number of cents
 // ---------------------------------------------------------------------------
 describe("refundFee — unreadable amounts", () => {
-  // INVARIANT: the same rule src/refund.ts:45-49 applies to a broken clock —
+  // INVARIANT: the same rule src/domain/refund.ts:45-49 applies to a broken clock —
   // "an absent or broken clock must never fall through to a payout" — applied
   // to the amount. An amount that is not a real number of cents must not fall
   // through to a concrete fee the platform keeps: refuse it, or take nothing.

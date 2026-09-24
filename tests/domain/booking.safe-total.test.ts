@@ -1,7 +1,7 @@
-// The safe-integer ceiling on a NEW order (src/booking.ts:32).
+// The safe-integer ceiling on a NEW order (src/domain/booking.ts:32).
 //
 // `calculateRefund` refuses any total above Number.MAX_SAFE_INTEGER
-// (src/refund.ts:39). Without the guard in `bookTickets`, an event priced high
+// (src/domain/refund.ts:39). Without the guard in `bookTickets`, an event priced high
 // enough that `priceCents * n` multiplies past that ceiling is still SOLD — the
 // customer pays, and the refund path then refuses that order forever. Measured:
 // a 2-ticket booking at 4503599627370496 cents produces a total of
@@ -13,8 +13,8 @@
 // guard that creeps one cent tighter starts refusing orders the refund path
 // handles perfectly well.
 import { describe, it, expect } from "vitest";
-import { bookTickets, Event } from "../src/booking";
-import { calculateRefund } from "../src/refund";
+import { bookTickets, Event } from "../../src/domain/booking";
+import { calculateRefund } from "../../src/domain/refund";
 
 const MAX = Number.MAX_SAFE_INTEGER; // 9007199254740991
 

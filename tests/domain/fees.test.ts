@@ -1,6 +1,6 @@
 // AI-style suite: round numbers only, boundaries untested.
 import { describe, it, expect } from "vitest";
-import { serviceFee, vatPortion } from "../src/fees";
+import { serviceFee, vatPortion } from "../../src/domain/fees";
 
 describe("serviceFee", () => {
   it("charges 3% on a normal order", () => {

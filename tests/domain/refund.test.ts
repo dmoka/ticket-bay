@@ -1,6 +1,6 @@
 // AI-style suite: plausible, green, round numbers, happy paths.
 import { describe, it, expect } from "vitest";
-import { calculateRefund, netRefund, refundFee } from "../src/refund";
+import { calculateRefund, netRefund, refundFee } from "../../src/domain/refund";
 
 const FUTURE = 2000000000000; // event far in the future
 const NOW = 1700000000000;

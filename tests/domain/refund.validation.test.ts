@@ -2,7 +2,7 @@
 // mutation lane flagged as reachable. The other six survivors it reported are
 // mathematically equivalent and deliberately not chased here.
 import { describe, it, expect } from "vitest";
-import { calculateRefund, netRefund } from "../src/refund";
+import { calculateRefund, netRefund } from "../../src/domain/refund";
 
 const S = 1_700_000_000_000;
 const BEFORE = S - 1;

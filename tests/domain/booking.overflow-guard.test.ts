@@ -1,19 +1,19 @@
 // The booking overflow guard, attacked.
 //
-// src/booking.ts refuses a sale whose gross exceeds Number.MAX_SAFE_INTEGER.
+// src/domain/booking.ts refuses a sale whose gross exceeds Number.MAX_SAFE_INTEGER.
 // The check runs on `gross`, BEFORE the discount is applied. That is
 // deliberately conservative — it refuses some orders whose discounted total
 // would have been representable — and the reasoning is pinned below so nobody
 // loosens it by accident.
 import { describe, it, expect } from "vitest";
-import { calculateRefund, netRefund, Order } from "../src/refund";
-import { bookTickets, Event } from "../src/booking";
+import { calculateRefund, netRefund, Order } from "../../src/domain/refund";
+import { bookTickets, Event } from "../../src/domain/booking";
 
 const S = 1_700_000_000_000;
 
 
 // ---------------------------------------------------------------------------
-// src/booking.ts:32 — `Number.isSafeInteger(gross)` runs BEFORE the discount is
+// src/domain/booking.ts:32 — `Number.isSafeInteger(gross)` runs BEFORE the discount is
 // applied. That is deliberately conservative: it refuses some orders whose
 // discounted total WOULD have been refundable. Pinned as the accepted trade-off
 // it is, with the reasoning, so nobody loosens it by accident.

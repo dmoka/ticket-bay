@@ -16,11 +16,11 @@
 //
 // Every invariant is stated in English above the property that encodes it, and
 // every invariant is a rule about money or about the published contract in
-// src/refund.ts — never a restatement of the arithmetic in it.
+// src/domain/refund.ts — never a restatement of the arithmetic in it.
 import { describe, it, expect } from "vitest";
 import fc from "fast-check";
-import { calculateRefund, netRefund, refundFee, Order } from "../src/refund";
-import { bookTickets, Event } from "../src/booking";
+import { calculateRefund, netRefund, refundFee, Order } from "../../src/domain/refund";
+import { bookTickets, Event } from "../../src/domain/booking";
 
 // ---------------------------------------------------------------------------
 // Walking the double line
@@ -345,7 +345,7 @@ describe("calculateRefund — where the refund window closes", () => {
 // A closed window closes the money — and nothing else
 // ---------------------------------------------------------------------------
 describe("calculateRefund — a closed window is not a shortcut", () => {
-  // INVARIANT (src/refund.ts:53-54): a closed window closes the money, it does
+  // INVARIANT (src/domain/refund.ts:53-54): a closed window closes the money, it does
   // not excuse a bad call. Every order and cancellation the refund path refuses
   // while the window is open, it refuses just the same after the event — a gate
   // placed above the validation would silently answer "nothing owed" to a call
@@ -403,7 +403,7 @@ describe("calculateRefund — a closed window is not a shortcut", () => {
     );
   });
 
-  // INVARIANT (src/refund.ts:45-46): an absent or broken clock must never fall
+  // INVARIANT (src/domain/refund.ts:45-46): an absent or broken clock must never fall
   // through to a payout. A reading that is not a real instant is refused; it
   // never quietly pays, and it never quietly counts as "the event has started".
   it("never pays on a clock that is not a real instant", () => {
@@ -427,7 +427,7 @@ describe("calculateRefund — a closed window is not a shortcut", () => {
   });
 
   // INVARIANT: once the window has closed nobody is paid — not the customer, and
-  // not the platform. The gate sits above the fee (src/refund.ts:52-53), so a
+  // not the platform. The gate sits above the fee (src/domain/refund.ts:52-53), so a
   // refused refund earns no fee revenue either: gross, fee and net are all zero.
   it("earns the platform nothing once the window has closed", () => {
     fc.assert(
@@ -550,7 +550,7 @@ describe("refundFee — the guard did not move a real cent amount", () => {
     );
   });
 
-  // INVARIANT (src/refund.ts:79 — "Min 50, 2% of refund"): the minimum is really
+  // INVARIANT (src/domain/refund.ts:79 — "Min 50, 2% of refund"): the minimum is really
   // collected. On any refund the platform keeps at least 50 cents, or the whole
   // refund when the refund is smaller than the minimum.
   it("always collects the minimum, or the whole refund when that is smaller", () => {

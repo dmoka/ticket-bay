@@ -1,11 +1,11 @@
 // Adversarial lane — the refund cut-off at `eventStartMs`.
 //
-// src/refund.ts states the rule in its own words:
+// src/domain/refund.ts states the rule in its own words:
 //
 //   "Business rule: cancellations are only allowed BEFORE the event starts.
 //    From `eventStartMs` on, the refund is zero."
 //
-// `calculateRefund` takes `nowMs` and validates it (src/refund.ts:47) — but
+// `calculateRefund` takes `nowMs` and validates it (src/domain/refund.ts:47) — but
 // nothing in the function body ever compares it to `order.eventStartMs`. The
 // clock is checked for being a number and then dropped on the floor.
 //
@@ -21,7 +21,7 @@
 //
 // These tests cover the closed side.
 import { describe, it, expect } from "vitest";
-import { calculateRefund, netRefund, Order } from "../src/refund";
+import { calculateRefund, netRefund, Order } from "../../src/domain/refund";
 
 const START = 1_700_000_000_000;
 const HOUR = 3_600_000;
@@ -76,7 +76,7 @@ describe("refunds close when the event starts", () => {
     expect(calculateRefund(ord(), 4, START - 1)).toBe(10_000);
   });
 
-  // `nowMs` is only required to be finite (src/refund.ts:47), so a fractional
+  // `nowMs` is only required to be finite (src/domain/refund.ts:47), so a fractional
   // millisecond sits between the two sides and has to land on the closed one.
   it("pays nothing half a millisecond after the start", () => {
     expect(calculateRefund(ord(), 4, START + 0.5)).toBe(0);

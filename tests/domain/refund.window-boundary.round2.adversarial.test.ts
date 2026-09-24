@@ -4,7 +4,7 @@
 // missing entirely. It is there now: `nowMs >= order.eventStartMs -> 0`. This
 // file attacks the fix rather than the hole it filled, in three directions:
 //
-//   1. A closed window must not swallow a bad call. src/refund.ts:53-54 makes
+//   1. A closed window must not swallow a bad call. src/domain/refund.ts:53-54 makes
 //      that promise in its own words — "Out-of-range input still throws above:
 //      a closed window closes the money, it does not excuse a bad call" — and
 //      NOTHING in the suite checks it. Every existing rejection test
@@ -27,7 +27,7 @@
 // test that recomputes `total * cancelled / tickets` agrees with the code by
 // construction and would agree with it while it was wrong.
 import { describe, it, expect } from "vitest";
-import { calculateRefund, netRefund, refundFee, Order } from "../src/refund";
+import { calculateRefund, netRefund, refundFee, Order } from "../../src/domain/refund";
 
 const START = 1_700_000_000_000;
 const HOUR = 3_600_000;
@@ -165,7 +165,7 @@ describe("a customer who cancelled in time is still paid in full", () => {
   // Splitting a cancellation across the boundary is not a way to be paid twice:
   // whatever was collected in time plus whatever is collected afterwards can
   // never exceed the amount paid. The shapes above include the ones documented
-  // at src/refund.ts:22-27 as overpaying when refunded one ticket at a time, so
+  // at src/domain/refund.ts:22-27 as overpaying when refunded one ticket at a time, so
   // this is the case where an escape would show.
   it("cannot be topped up after the show by splitting the cancellation", () => {
     for (const [, order] of shapes.map((s) => [s[0], s[1]] as const)) {

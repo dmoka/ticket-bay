@@ -6,7 +6,7 @@
 // divides and can hand back a cent MORE than the customer paid. These tests
 // exist so nobody reintroduces it.
 import { describe, it, expect } from "vitest";
-import { calculateRefund, netRefund } from "../src/refund";
+import { calculateRefund, netRefund } from "../../src/domain/refund";
 
 const S = 1_700_000_000_000;
 const ord = (o = {}) => ({ totalCents: 10_000, tickets: 4, discountPercent: 0, eventStartMs: S, ...o });

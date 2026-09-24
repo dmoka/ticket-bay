@@ -1,7 +1,7 @@
-// Property-based suite for the rounding behaviour src/refund.ts documents about
+// Property-based suite for the rounding behaviour src/domain/refund.ts documents about
 // itself.
 //
-// src/refund.ts:19-27 states the stateless contract and its consequence out
+// src/domain/refund.ts:19-27 states the stateless contract and its consequence out
 // loud: each call rounds to the nearest cent independently, so cancelling
 // piecemeal can overshoot the total by up to half a cent per ticket. The
 // precondition is `2 * (totalCents mod tickets) >= tickets` — NOT "the order
@@ -21,8 +21,8 @@
 // these properties into decoration.
 import { describe, it, expect } from "vitest";
 import fc from "fast-check";
-import { calculateRefund, netRefund, refundFee, Order } from "../src/refund";
-import { bookTickets, Event } from "../src/booking";
+import { calculateRefund, netRefund, refundFee, Order } from "../../src/domain/refund";
+import { bookTickets, Event } from "../../src/domain/booking";
 
 // ---------------------------------------------------------------------------
 // Clock helpers.
@@ -61,7 +61,7 @@ function strictlyBefore(start: number, delta: number): number {
 
 /**
  * Event start instants. Every value is finite (an infinite or NaN start is
- * refused by src/refund.ts:42 and is a different rule), and every one is small
+ * refused by src/domain/refund.ts:42 and is a different rule), and every one is small
  * enough in magnitude that a strictly-later finite instant exists — otherwise
  * "after the event started" would be unreachable and the properties vacuous.
  */
@@ -151,7 +151,7 @@ const RUNS = { numRuns: 3000 } as const;
 // ---------------------------------------------------------------------------
 // The other numeric claims the docstring makes out loud.
 //
-// src/refund.ts:24-27 names two orders by value and says what they do. Those are
+// src/domain/refund.ts:24-27 names two orders by value and says what they do. Those are
 // checkable statements about the code, so they are checked here: a docstring
 // that quietly stops being true is how the next reader gets misled. They also
 // keep the "at most half a cent per ticket" bound in tests/refund.property.ts

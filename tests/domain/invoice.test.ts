@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildInvoice } from "../src/invoice";
+import { buildInvoice } from "../../src/domain/invoice";
 
 const NOW = 1700000000000;
 const DAY = 86_400_000;

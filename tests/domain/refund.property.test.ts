@@ -1,14 +1,14 @@
 // Property-based suite for the refund money path.
 //
-// These test INVARIANTS derived from the docstrings in src/refund.ts, not the
+// These test INVARIANTS derived from the docstrings in src/domain/refund.ts, not the
 // formulas in it. Re-deriving `Math.round(total * cancelled / tickets)` here
 // would prove nothing except that the code equals itself.
 //
 // Every invariant is stated in English above the property that encodes it.
 import { describe, it, expect } from "vitest";
 import fc from "fast-check";
-import { calculateRefund, netRefund, refundFee, Order } from "../src/refund";
-import { bookTickets, Event } from "../src/booking";
+import { calculateRefund, netRefund, refundFee, Order } from "../../src/domain/refund";
+import { bookTickets, Event } from "../../src/domain/booking";
 
 // ---------------------------------------------------------------------------
 // Generators. These deliberately cover the ugly ranges: 0, 1 cent, the 50-cent
@@ -240,7 +240,7 @@ describe("calculateRefund — the clock argument", () => {
 // ---------------------------------------------------------------------------
 // refundFee
 //
-// src/refund.ts:38 states the spec: "Fee kept by the platform on every refund,
+// src/domain/refund.ts:38 states the spec: "Fee kept by the platform on every refund,
 // in cents. Min 50, 2% of refund."
 // ---------------------------------------------------------------------------
 describe("refundFee — invariants", () => {
@@ -258,7 +258,7 @@ describe("refundFee — invariants", () => {
   // netRefund unreachable: while the fee is capped at the refund, net can never
   // go negative. The clamp is therefore dead code, and no test can kill its
   // mutants — which is exactly why this property matters. Loosen the cap at
-  // src/refund.ts:67 and this fails at refundCents = 1 (fee 50 > refund 1),
+  // src/domain/refund.ts:67 and this fails at refundCents = 1 (fee 50 > refund 1),
   // as does the net + fee conservation property below.
   it("the fee is between zero and the refund", () => {
     fc.assert(
@@ -571,7 +571,7 @@ describe("split cancellations — rounding drift", () => {
 // The top of the range calculateRefund says it accepts
 // ---------------------------------------------------------------------------
 describe("calculateRefund — the full range the validator admits", () => {
-  // INVARIANT: the guard at src/refund.ts:29 admits any integer total up to
+  // INVARIANT: the guard at src/domain/refund.ts:29 admits any integer total up to
   // Number.MAX_SAFE_INTEGER, so every such order must still obey the money
   // invariants: full cancellation returns exactly what was paid, and a refund
   // never exceeds it.
