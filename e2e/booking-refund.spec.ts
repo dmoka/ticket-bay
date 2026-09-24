@@ -1,28 +1,31 @@
-// The money path, through a real browser. Assert what the user SEES —
-// the refund amount rendered on the page, never just "page loaded".
-//
-// Its own server (support/harness.ts) rather than the shared one on 4173: that
-// server holds the venue in module-level state, and this spec used to share it
-// with refund-money-paths.spec.ts running in a parallel worker. See the note at
-// the top of that file.
+// The money path, through a real browser. Assert what the user SEES — the
+// amounts rendered on the page, never just "page loaded".
 import { test, expect } from "@playwright/test";
-import { startClockServer, ClockServer } from "./support/harness";
-
-const running: ClockServer[] = [];
-
-test.afterEach(() => {
-  while (running.length) running.pop()!.stop();
-});
+import { bookThroughUI, cancelButton, cancelOnPage, freshVenue, refundLine, ticketsLine, totalLine } from "./support/app";
 
 test("book two tickets, cancel, see the exact refund amount", async ({ page }) => {
-  const server = await startClockServer();
-  running.push(server);
+  const ev = freshVenue();
+  await bookThroughUI(page, ev, "2");
 
-  await page.goto(server.url);
-  await page.getByLabel("Tickets:").fill("2");
-  await page.getByRole("button", { name: "Book tickets" }).click();
-  await expect(page.getByText("Paid: 10000 cents")).toBeVisible();
-  await page.getByRole("button", { name: "Cancel order" }).click();
-  // paid 10000, fee 2% = 200 -> the user must SEE 9800
-  await expect(page.getByText("Refunded: 9800 cents")).toBeVisible();
+  // 2 x €50.00, no discount; the 3% service fee (€3.00) is on top.
+  await expect(ticketsLine(page)).toHaveText("Tickets €100.00");
+  await expect(totalLine(page)).toHaveText("Total paid €103.00");
+
+  await cancelOnPage(page);
+  // Refund is on the €100.00 paid for tickets, less the 2% fee (€2.00): the user must SEE €98.00.
+  await expect(refundLine(page)).toHaveText("Refunded €98.00");
+  await expect(cancelButton(page)).toBeHidden();
+});
+
+test("the checkout shows the invoice line by line before the customer pays", async ({ page }) => {
+  const ev = freshVenue();
+  await page.goto(`/events/${ev.id}/checkout?qty=5`);
+  await expect(page.getByTestId("line-subtotal")).toHaveText("5 × €50.00 €250.00");
+  await expect(page.getByTestId("line-discount")).toContainText("−€12.50");
+  await expect(page.getByTestId("line-discount")).toContainText("group 5%");
+  await expect(ticketsLine(page)).toHaveText("Tickets €237.50");
+  await expect(page.getByTestId("line-fee")).toHaveText("Service fee €7.13");
+  await expect(totalLine(page)).toHaveText("Total €244.63");
+  await expect(page.getByTestId("line-vat")).toHaveText("incl. VAT 27% €52.01");
+  await expect(page.getByRole("button", { name: "Pay €244.63" })).toBeEnabled();
 });

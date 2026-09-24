@@ -1,96 +1,91 @@
 // Money paths through a real browser: what the customer is told they paid, and
-// what they are told they got back. Every assertion is on rendered text or on a
-// control the user can (or can no longer) click.
-//
-// Each test gets its OWN server (support/harness.ts), like the rest of the
-// suite. These specs used to share Playwright's `webServer` on 4173 with
-// booking-refund.spec.ts, and that server keeps `orders` and `event.seatsSold`
-// as module-level state (server/server.ts:21 and the `event` object). Two spec
-// files running in parallel workers were mutating one venue's inventory while
-// asserting exact amounts against it — and because `reuseExistingServer` hands
-// a leaked server to the NEXT run, that state outlived the run that created it.
-// A pristine venue per test is what makes an exact-cents assertion meaningful.
-import { test, expect, BrowserContext } from "@playwright/test";
-import { startClockServer, ClockServer } from "./support/harness";
-import { cancelButton, collectDialogs, paidLine, refundLine } from "./support/ui";
+// what they are told they got back. Every assertion is on rendered text or on
+// a control the user can (or can no longer) click.
+import { test, expect } from "@playwright/test";
+import {
+  bookThroughUI,
+  cancelButton,
+  cancelOnPage,
+  checkoutError,
+  ensureCode,
+  freshVenue,
+  refundLine,
+  seatsLeft,
+  startCheckout,
+  ticketsLine,
+} from "./support/app";
 
-const running: ClockServer[] = [];
-
-test.afterEach(() => {
-  while (running.length) running.pop()!.stop();
+test("group booking: the refund matches the discounted price the user was charged", async ({ page }) => {
+  const ev = freshVenue();
+  await bookThroughUI(page, ev, "10");
+  // 10 x €50.00 with the 10% group discount.
+  await expect(ticketsLine(page)).toHaveText("Tickets €450.00");
+  await cancelOnPage(page);
+  // Refund is proportional to what was PAID (€450.00), minus the 2% fee (€9.00).
+  await expect(refundLine(page)).toHaveText("Refunded €441.00");
 });
 
-/** A freshly booted venue and a page already on it. */
-async function freshVenue(context: BrowserContext) {
-  const server = await startClockServer();
-  running.push(server);
-  const page = await context.newPage();
-  await page.goto(server.url);
-  return page;
-}
-
-test("group booking: the refund matches the discounted price the user was charged", async ({ context }) => {
-  const page = await freshVenue(context);
-  await page.getByLabel("Tickets:").fill("10");
-  await page.getByRole("button", { name: "Book tickets" }).click();
-
-  // 10 x €50.00 with the 10% group discount -> 45000 cents charged.
-  await expect(paidLine(page)).toHaveText(/^Paid: 45000 cents /);
-
-  await page.getByRole("button", { name: "Cancel order" }).click();
-  // Refund is proportional to what was PAID (45000), minus the 2% fee (900).
-  await expect(refundLine(page)).toHaveText("Refunded: 44100 cents");
+test("the 5-ticket group tier is charged and refunded at 5%, not 10%", async ({ page }) => {
+  const ev = freshVenue();
+  await bookThroughUI(page, ev, "5");
+  await expect(ticketsLine(page), "5 tickets must get the 5% tier, not 10%").toHaveText("Tickets €237.50");
+  await cancelOnPage(page);
+  // 2% of €237.50 is €4.75.
+  await expect(refundLine(page)).toHaveText("Refunded €232.75");
 });
 
-test("the 5-ticket group tier is charged and refunded at 5%, not 10%", async ({ context }) => {
-  const page = await freshVenue(context);
-  await page.getByLabel("Tickets:").fill("5");
-  await page.getByRole("button", { name: "Book tickets" }).click();
-
-  // 5 x €50.00 crosses the 5% tier but not the 10% one -> 23750 cents charged.
-  await expect(paidLine(page), "5 tickets must get the 5% tier, not 10%").toHaveText(/^Paid: 23750 cents /);
-
-  await page.getByRole("button", { name: "Cancel order" }).click();
-  // 2% of 23750 is 475, so the customer must see 23275 back.
-  await expect(refundLine(page)).toHaveText("Refunded: 23275 cents");
+test("four tickets get no group discount, and the refund reflects the full price", async ({ page }) => {
+  const ev = freshVenue();
+  await bookThroughUI(page, ev, "4");
+  await expect(ticketsLine(page), "4 tickets is below the group tier — no discount").toHaveText("Tickets €200.00");
+  await cancelOnPage(page);
+  await expect(refundLine(page)).toHaveText("Refunded €196.00");
 });
 
-test("four tickets get no group discount, and the refund reflects the full price", async ({ context }) => {
-  const page = await freshVenue(context);
-  await page.getByLabel("Tickets:").fill("4");
-  await page.getByRole("button", { name: "Book tickets" }).click();
-
-  // One short of the 5% tier -> full 20000 cents.
-  await expect(paidLine(page), "4 tickets is below the group tier — no discount").toHaveText(/^Paid: 20000 cents /);
-
-  await page.getByRole("button", { name: "Cancel order" }).click();
-  await expect(refundLine(page)).toHaveText("Refunded: 19600 cents");
-});
-
-test("a refunded order cannot be cancelled twice from the page", async ({ context }) => {
-  const page = await freshVenue(context);
-  await page.getByLabel("Tickets:").fill("2");
-  await page.getByRole("button", { name: "Book tickets" }).click();
-  await expect(paidLine(page)).toHaveText(/^Paid: 10000 cents /);
-
-  const cancel = cancelButton(page);
-  await cancel.click();
-  await expect(refundLine(page)).toHaveText("Refunded: 9800 cents");
-
+test("a refunded order cannot be cancelled twice from the page", async ({ page }) => {
+  const ev = freshVenue();
+  await bookThroughUI(page, ev, "2");
+  await cancelOnPage(page);
+  await expect(refundLine(page)).toHaveText("Refunded €98.00");
   // The customer must not be able to trigger a second payout for the same order.
-  await expect(cancel).toBeHidden();
-  await expect(refundLine(page)).toHaveText("Refunded: 9800 cents");
+  await expect(cancelButton(page)).toBeHidden();
+  await page.reload();
+  await expect(cancelButton(page)).toBeHidden();
+  await expect(refundLine(page)).toHaveText("Refunded €98.00");
 });
 
-test("a booking bigger than the venue is refused and charges nothing", async ({ context }) => {
-  const page = await freshVenue(context);
-  const dialogs = collectDialogs(page);
+test("a booking bigger than the venue is refused and charges nothing", async ({ page }) => {
+  const ev = freshVenue();
+  await startCheckout(page, ev, "999");
+  await expect(checkoutError(page)).toHaveText("Not enough seats — only 60 left.");
+  await expect(page.getByRole("button", { name: /^Pay/ })).toBeDisabled();
+  // No order was created, so no seat was taken.
+  await page.goto(`/events/${ev.id}`);
+  await expect(seatsLeft(page)).toHaveText("60 / 100");
+});
 
-  await page.getByLabel("Tickets:").fill("999");
-  await page.getByRole("button", { name: "Book tickets" }).click();
+test("a discount code is applied at checkout and shows up on the refund", async ({ page }) => {
+  const ev = freshVenue();
+  ensureCode("WELCOME10", 10);
+  await page.goto(`/events/${ev.id}/checkout?qty=2`);
+  await page.getByLabel("Discount code").fill("welcome10");
+  await page.getByRole("button", { name: "Apply" }).click();
+  await expect(page.getByText("WELCOME10 applied")).toBeVisible();
+  await expect(ticketsLine(page)).toHaveText("Tickets €90.00");
+  await page.getByLabel("Email").fill("coder@example.com");
+  await page.getByLabel("Name on tickets").fill("A Coder");
+  await page.getByRole("button", { name: "Pay €92.70" }).click();
+  await page.waitForURL(/\/orders\/\d+/);
+  await expect(ticketsLine(page)).toHaveText("Tickets €90.00");
+  await cancelOnPage(page);
+  // €90.00 less the 2% fee (€1.80).
+  await expect(refundLine(page)).toHaveText("Refunded €88.20");
+});
 
-  await expect.poll(() => dialogs.join("|")).toContain("not enough seats");
-  // No order was created, so there is nothing to pay and nothing to cancel.
-  await expect(paidLine(page)).toBeHidden();
-  await expect(cancelButton(page)).toBeHidden();
+test("an unknown discount code is explained and never blocks the order", async ({ page }) => {
+  const ev = freshVenue();
+  await page.goto(`/events/${ev.id}/checkout?qty=2&code=NOPE`);
+  await expect(page.getByText("Unknown discount code.")).toBeVisible();
+  await expect(ticketsLine(page)).toHaveText("Tickets €100.00");
+  await expect(page.getByRole("button", { name: "Pay €103.00" })).toBeEnabled();
 });
