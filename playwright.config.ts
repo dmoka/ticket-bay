@@ -1,6 +1,9 @@
 import { defineConfig } from "@playwright/test";
-import { E2E_DATABASE, E2E_PORT } from "./e2e/support/env";
+import { E2E_PORT } from "./e2e/support/env";
 
+// Playwright covers the critical money paths only — booking with a discount,
+// a refund inside the window, a refund refused after the event starts. Every
+// other rule is cheaper and faster to pin in tests/domain or tests/integration.
 export default defineConfig({
   testDir: "./e2e",
   fullyParallel: true,
@@ -11,21 +14,17 @@ export default defineConfig({
     screenshot: "only-on-failure",
     trace: "retain-on-failure",
   },
-  // One production build of the real app over its own SQLite file. Specs never
-  // share a venue: each creates its own event (support/app.ts), so parallel
-  // workers cannot eat each other's seats. TICKETBAY_TEST_CLOCK lets a spec
-  // move "now" for its own browser context only (lib/clock.ts).
+  // A production build of the real app over its own Postgres container, started
+  // by e2e/support/server.ts (Testcontainers — Docker must be running), migrated
+  // and seeded with one event per spec, so parallel workers never share seats.
   webServer: {
-    command: `rm -f ${E2E_DATABASE} ${E2E_DATABASE}-wal ${E2E_DATABASE}-shm && npm run db:migrate && npm run build && npx next start -p ${E2E_PORT}`,
+    command: "npm run build && npx tsx e2e/support/server.ts",
     url: `http://localhost:${E2E_PORT}`,
     reuseExistingServer: false,
     timeout: 240_000,
     stdout: "ignore",
     stderr: "pipe",
-    env: {
-      DATABASE_PATH: E2E_DATABASE,
-      TICKETBAY_TEST_CLOCK: "1",
-      STRIPE_SECRET_KEY: "sk_test_e2e",
-    },
+    // Let server.ts stop its container instead of being SIGKILLed.
+    gracefulShutdown: { signal: "SIGTERM", timeout: 15_000 },
   },
 });
