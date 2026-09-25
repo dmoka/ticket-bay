@@ -171,6 +171,19 @@ export async function listEventsAdmin(db: DbLike): Promise<EventAdminRow[]> {
   });
 }
 
+/** What cancelling an event would do: the paid orders and the ticket money to return. */
+export async function cancelImpact(db: DbLike, eventId: string): Promise<{ orders: number; tickets: number; refundCents: number }> {
+  const [r] = await db
+    .select({
+      orders: total(sql`count(*)`),
+      tickets: total(sql`sum(${orders.quantity})`),
+      refundCents: total(sql`sum(${orders.ticketsCents})`),
+    })
+    .from(orders)
+    .where(sql`${orders.eventId} = ${eventId} and ${orders.status} = 'paid'`);
+  return r ?? { orders: 0, tickets: 0, refundCents: 0 };
+}
+
 export type OrderSort = "created" | "total" | "quantity" | "event";
 export interface OrderFilter {
   status?: "paid" | "refunded";

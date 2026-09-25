@@ -1,17 +1,22 @@
 import Link from "next/link";
 import { getDb } from "@/src/db/client";
-import { listEventsAdmin } from "@/src/db/admin-queries";
+import { cancelImpact, listEventsAdmin } from "@/src/db/admin-queries";
 import { now } from "@/lib/clock";
 import { date, money, num, time } from "@/lib/format";
 import { CATEGORY_LABEL, eventStatus } from "@/lib/status";
 import { Meter, Mono, PageHeader, StatusBadge, Tag } from "@/components/app/primitives";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { CancelEventDialog } from "./cancel-event-dialog";
 
 export const metadata = { title: "Events" };
 
-export default async function AdminEvents() {
+export default async function AdminEvents({ searchParams }: { searchParams: Promise<{ cancel?: string; via?: string }> }) {
+  const sp = await searchParams;
   const nowMs = await now();
   const rows = await listEventsAdmin(getDb());
+  // Deep link from the cancel_event MCP tool (or the row's Cancel… link).
+  const toCancel = rows.find((r) => r.event.id === sp.cancel && r.event.cancelledAtMs === null && r.event.startsAtMs > nowMs)?.event;
+  const impact = toCancel ? await cancelImpact(getDb(), toCancel.id) : null;
   const capacity = rows.reduce((s, r) => s + r.event.totalSeats, 0);
   const sold = rows.reduce((s, r) => s + r.event.seatsSold, 0);
 
@@ -25,11 +30,19 @@ export default async function AdminEvents() {
           </>
         }
       />
+      {toCancel && impact && (
+        <CancelEventDialog
+          key={toCancel.id}
+          event={{ id: toCancel.id, name: toCancel.name, when: `${date(toCancel.startsAtMs)} ${time(toCancel.startsAtMs)}` }}
+          impact={impact}
+          fromAgent={sp.via === "mcp"}
+        />
+      )}
       <div className="surface">
         <Table>
           <TableHeader>
             <TableRow className="hover:bg-transparent">
-              {["Event", "Date", "Status", "Price", "Sold", "Capacity", "Sell-through", "Orders", "Refunds", "Revenue"].map((h, i) => (
+              {["Event", "Date", "Status", "Price", "Sold", "Capacity", "Sell-through", "Orders", "Refunds", "Revenue", ""].map((h, i) => (
                 <TableHead
                   key={h}
                   className={`h-8 text-[11px] font-normal text-muted-foreground ${i === 0 ? "px-3" : ""} ${i >= 3 && i !== 6 ? "text-right" : ""} ${i === 9 ? "px-3" : ""}`}
@@ -84,6 +97,13 @@ export default async function AdminEvents() {
                   </TableCell>
                   <TableCell className="px-3 py-1.5 text-right">
                     <Mono>{money(revenueCents)}</Mono>
+                  </TableCell>
+                  <TableCell className="py-1.5 pr-3 text-right">
+                    {e.cancelledAtMs === null && e.startsAtMs > nowMs && (
+                      <Link href={`/admin/events?cancel=${e.id}`} className="text-[12px] text-muted-foreground hover:text-foreground hover:underline">
+                        Cancel…
+                      </Link>
+                    )}
                   </TableCell>
                 </TableRow>
               );

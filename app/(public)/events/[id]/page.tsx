@@ -26,7 +26,7 @@ export default async function EventPage({ params }: { params: Promise<{ id: stri
   const status = eventStatus(ev, nowMs);
   const left = Math.max(0, ev.totalSeats - ev.seatsSold);
   const earlyBird = earlyBirdApplies({ startMs: ev.startsAtMs }, nowMs);
-  const onSale = status !== "past" && status !== "sold-out";
+  const onSale = status !== "past" && status !== "sold-out" && status !== "cancelled";
   const tiers = priceTiers(ev.priceCents);
 
   return (
@@ -133,7 +133,11 @@ export default async function EventPage({ params }: { params: Promise<{ id: stri
               </form>
             ) : (
               <div className="mt-6 rounded-md border border-border bg-muted/50 px-3 py-2.5 text-center text-[13px] text-muted-foreground">
-                {status === "past" ? "This event has already taken place." : "Sold out — no seats left."}
+                {status === "past"
+                  ? "This event has already taken place."
+                  : status === "cancelled"
+                    ? "This event has been cancelled. Every ticket holder got a full refund of the ticket price."
+                    : "Sold out — no seats left."}
               </div>
             )}
           </div>

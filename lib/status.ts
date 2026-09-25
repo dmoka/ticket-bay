@@ -1,9 +1,10 @@
 import type { EventRow } from "@/src/db/schema";
 import { earlyBirdApplies } from "@/src/domain/invoice";
 
-export type EventStatus = "on-sale" | "early-bird" | "few-left" | "sold-out" | "past";
+export type EventStatus = "cancelled" | "on-sale" | "early-bird" | "few-left" | "sold-out" | "past";
 
 export function eventStatus(ev: EventRow, nowMs: number): EventStatus {
+  if (ev.cancelledAtMs !== null) return "cancelled";
   if (nowMs >= ev.startsAtMs) return "past";
   const left = ev.totalSeats - ev.seatsSold;
   if (left <= 0) return "sold-out";
@@ -18,6 +19,7 @@ export const STATUS_LABEL: Record<string, string> = {
   "few-left": "Few left",
   "sold-out": "Sold out",
   past: "Past",
+  cancelled: "Cancelled",
   paid: "Paid",
   refunded: "Refunded",
   active: "Active",
@@ -38,6 +40,7 @@ export const STATUS_STYLE: Record<string, string> = {
   "few-left": amber,
   "sold-out": red,
   past: zinc,
+  cancelled: red,
   paid: green,
   refunded: amber,
   active: green,

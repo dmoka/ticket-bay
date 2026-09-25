@@ -8,6 +8,7 @@
 import { randomUUID } from "node:crypto";
 import { McpServer, type CallToolResult } from "@modelcontextprotocol/server";
 import * as z from "zod";
+import { cancelImpact } from "../db/admin-queries";
 import type { Db } from "../db/client";
 import { getEvent, listEvents, toDomainEvent } from "../db/events-repo";
 import { listOrdersByUser, toDomainOrder } from "../db/orders-repo";
@@ -392,12 +393,19 @@ export function createTicketBayServer(deps: ToolDeps, caller: Caller, opts: { in
       const ev = await getEvent(db, event_id);
       if (!ev) return fail(`No event with id "${event_id}".`);
       if (ev.cancelledAtMs !== null) return fail(`${ev.name} is already cancelled.`);
+      const impact = await cancelImpact(db, ev.id);
       const url = new URL("/admin/events", baseURL);
       url.searchParams.set("cancel", ev.id);
+      url.searchParams.set("via", "mcp");
       return json({
         cancelled: false,
         action_required: "A human must confirm this in the dashboard. Nothing has changed yet.",
-        event: { id: ev.id, name: ev.name, starts_at: localTime(ev.startsAtMs), tickets_sold: ev.seatsSold },
+        event: { id: ev.id, name: ev.name, starts_at: localTime(ev.startsAtMs) },
+        impact_if_confirmed: {
+          paid_orders_refunded: impact.orders,
+          tickets_refunded: impact.tickets,
+          refund_total_eur: eur(impact.refundCents),
+        },
         confirm_url: url.toString(),
       });
     },
