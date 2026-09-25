@@ -20,6 +20,7 @@ Researched 2026-09-25 for TicketBay's MCP server (module 6). Two kinds of eviden
 | ChatGPT (developer mode / apps) | **no** | **yes — the only way for a user's account** | **no** — needs public HTTPS or a tunnel | **cannot connect as a customer** — ChatGPT sends no API keys |
 | Cursor | yes (`headers`) | yes, **DCR or static client only** (CIMD not documented) | yes (desktop) | works with a key |
 | VS Code (Copilot) | yes (`headers`) | yes, CIMD and DCR | yes | works with a key |
+| Hermes agent (NousResearch, self-hosted) | **yes** — `headers:` per server, `${VAR}` from `~/.hermes/.env` | yes (`auth: oauth`) | wherever Hermes runs must reach TicketBay | **works with a key** (docs verified; not run live yet) |
 
 **What that means for the course:** per-user API keys cover the developer tools (Claude Code,
 Cursor, VS Code). Chat apps are different: ChatGPT cannot send an API key at all, and
@@ -29,6 +30,27 @@ with OAuth ("Connect") from their cloud, to a public HTTPS URL. The OAuth build 
 `app/v2-mcp-oauth` advertised CIMD (`client_id_metadata_document_supported: true`, `none`
 auth method, S256 PKCE) and no DCR endpoint; Claude Code, Claude.ai, ChatGPT and VS Code
 support CIMD, Cursor's docs only describe DCR.
+
+## Hermes agent (docs, 2026-09-25)
+
+Source: NousResearch/hermes-agent, `website/docs/user-guide/features/mcp.md` and
+`website/docs/guides/use-mcp-with-hermes.md` (main branch, fetched 2026-09-25):
+
+```yaml
+mcp_servers:
+  remote_api:
+    url: "https://mcp.example.com/mcp"
+    headers:
+      Authorization: "Bearer ***"
+```
+
+> "Inside an entry's `transport.command`, `transport.args`, `transport.url`, and `headers`,
+> `${VAR}` placeholders are resolved at server-connect time from environment variables
+> (which include everything in `~/.hermes/.env`)."
+
+Per-server `tools: include / exclude` filtering is documented in the same guide. Hermes is
+self-hosted, so the connection comes from wherever Hermes runs — that machine must reach
+TicketBay's URL (localhost only if both run on the same machine).
 
 ## Verified live (2026-09-25, on the OAuth build — branch `app/v2-mcp-oauth`)
 

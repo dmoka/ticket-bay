@@ -42,6 +42,18 @@ claude mcp add --transport http ticketbay http://localhost:3000/api/mcp --header
 
 Without a key the public tools still work; a private tool answers `401` and says how to get a key. A read-only key can see your orders but is refused (`403`) on booking and refunds. `search_docs` answers policy questions from the help pages in [`help/`](help/). Dangerous actions only return a link: `cancel_event` points an admin at `/admin/events/<id>/cancel`, and nothing is cancelled until they confirm there.
 
+Self-hosted agents take the key the same way. [Hermes](https://github.com/NousResearch/hermes-agent), in `~/.hermes/config.yaml` with `TICKETBAY_API_KEY=tb_…` in `~/.hermes/.env`:
+
+```yaml
+mcp_servers:
+  ticketbay:
+    url: "http://localhost:3000/api/mcp"   # an address the machine running Hermes can reach
+    headers:
+      Authorization: "Bearer ${TICKETBAY_API_KEY}"
+    tools:
+      exclude: [cancel_event]              # optional: what this agent never sees
+```
+
 Which clients accept a key header (and which would need OAuth): [`docs/mcp-client-auth-2026.md`](docs/mcp-client-auth-2026.md). The end-to-end proof: [`docs/mcp-e2e-2026.md`](docs/mcp-e2e-2026.md).
 
 `npm run db:up` starts Postgres 17 from `docker-compose.yml` (port 5432, named volume `ticketbay-pg`) and waits until it is healthy. Its local-only credentials and `DATABASE_URL` live in `.env.example`; the scripts read it when there is no `.env`. Copy it to `.env` to change anything. `npm run db:down` stops the database; `docker compose down -v` also deletes its data.
