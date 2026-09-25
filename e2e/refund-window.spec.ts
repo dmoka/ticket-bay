@@ -6,13 +6,15 @@
 // the app's clock to one side of the edge, and asserts the AMOUNT on the page
 // and the SEATS on the event page.
 import { test, expect } from "@playwright/test";
-import { BOOKING_AT_MS, E2E_EVENTS, EVENT_START_MS } from "./support/env";
-import { bookThroughUI, cancelButton, cancelOnPage, refundLine, seatsLeft, setClock, ticketsLine, totalLine } from "./support/app";
+import { BOOKING_AT_MS, E2E_EVENTS, E2E_USERS, EVENT_START_MS } from "./support/env";
+import { bookThroughUI, cancelButton, cancelOnPage, refundLine, seatsLeft, setClock, signIn, ticketsLine, totalLine } from "./support/app";
 
 test("cancelling inside the window refunds the tickets less the fee and puts the seats back on sale", async ({ page, context }) => {
   const ev = E2E_EVENTS.refundInWindow;
+  const customer = E2E_USERS.refundInWindow;
   await setClock(context, BOOKING_AT_MS);
-  await bookThroughUI(page, ev, "2");
+  await signIn(page, customer);
+  await bookThroughUI(page, customer, ev, "2");
   await expect(ticketsLine(page)).toHaveText("Tickets €100.00");
   await expect(totalLine(page)).toHaveText("Total paid €103.00");
 
@@ -30,8 +32,10 @@ test("cancelling inside the window refunds the tickets less the fee and puts the
 
 test("cancelling once the event has started refunds nothing and the seats stay sold", async ({ page, context }) => {
   const ev = E2E_EVENTS.refundAfterStart;
+  const customer = E2E_USERS.refundAfterStart;
   await setClock(context, BOOKING_AT_MS);
-  await bookThroughUI(page, ev, "2");
+  await signIn(page, customer);
+  await bookThroughUI(page, customer, ev, "2");
 
   // `eventStartMs` itself is outside the window: "refunds close at this moment".
   await setClock(context, EVENT_START_MS);

@@ -6,7 +6,7 @@
 import { spawn } from "node:child_process";
 import { PostgreSqlContainer } from "@testcontainers/postgresql";
 import { closeDb, migrateDb, openDb } from "../../src/db/client";
-import { E2E_PORT } from "./env";
+import { E2E_AUTH_SECRET, E2E_BASE_URL, E2E_PORT } from "./env";
 import { seedE2E } from "./seed";
 
 const container = await new PostgreSqlContainer("postgres:17").start();
@@ -19,7 +19,15 @@ await closeDb(db);
 
 const app = spawn("npx", ["next", "start", "-p", String(E2E_PORT)], {
   stdio: "inherit",
-  env: { ...process.env, DATABASE_URL: url, TICKETBAY_TEST_CLOCK: "1", STRIPE_SECRET_KEY: "sk_test_e2e" },
+  env: {
+    ...process.env,
+    DATABASE_URL: url,
+    TICKETBAY_TEST_CLOCK: "1",
+    STRIPE_SECRET_KEY: "sk_test_e2e",
+    // `next start` does not read .env.example: Better Auth gets its settings here.
+    BETTER_AUTH_SECRET: E2E_AUTH_SECRET,
+    BETTER_AUTH_URL: E2E_BASE_URL,
+  },
 });
 
 let stopping = false;
