@@ -104,6 +104,18 @@ export const orders = pgTable(
   ],
 );
 
+/**
+ * One row per checkout in progress, keyed by its idempotency key. It lives
+ * only while the card is being charged: claimed before, deleted after. A
+ * second attempt with the same key waits for the claim to go away, then sees
+ * the first attempt's outcome. Holding a row — not a database connection —
+ * means a slow payment provider cannot tie up the connection pool.
+ */
+export const checkoutClaims = pgTable("checkout_claims", {
+  idempotencyKey: text("idempotency_key").primaryKey(),
+  claimedAtMs: instant("claimed_at_ms").notNull(),
+});
+
 export type EventRow = typeof events.$inferSelect;
 export type NewEventRow = typeof events.$inferInsert;
 export type OrderRow = typeof orders.$inferSelect;

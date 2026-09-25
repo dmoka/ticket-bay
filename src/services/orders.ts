@@ -5,9 +5,8 @@ import { bookTickets, seatsAvailable } from "../domain/booking";
 import { previewCancellation } from "../domain/cancellation";
 import { checkDiscountCode, normalizeCode, quote, type CodeCheck } from "../domain/pricing";
 import type { Invoice } from "../domain/invoice";
-import { drizzle } from "drizzle-orm/node-postgres";
 import type { Db } from "../db/client";
-import * as schema from "../db/schema";
+import { claimCheckout, releaseCheckout } from "../db/checkout-claims-repo";
 import { getCode, getCodeForUpdate, incrementUses, toDomainCode } from "../db/codes-repo";
 import { adjustSeatsSold, getEvent, getEventForUpdate, markEventCancelled, toDomainEvent } from "../db/events-repo";
 import {
@@ -116,31 +115,38 @@ export interface PlaceOrderInput {
   userId?: string;
 }
 
-export async function placeOrder(deps: Deps, input: PlaceOrderInput): Promise<{ order: OrderRow; replayed: boolean }> {
-  // Attempts with the same idempotency key run one after another, never
-  // overlapping: an agent that times out and resends while its first attempt
-  // is still running must see that attempt's outcome (an order, or a voided
-  // charge), not race it.
-  return withCheckoutLock(deps.db, input.idempotencyKey, (db) => placeOrderOnce({ ...deps, db }, input));
-}
+/** A claim older than this belongs to a checkout that crashed; it may be taken over. */
+const CLAIM_STALE_MS = 5 * 60_000;
+/** How long a second attempt with the same key waits for the first to finish. */
+const CLAIM_WAIT_MS = 15_000;
+const CLAIM_POLL_MS = 100;
 
-/**
- * Run `fn` holding a Postgres advisory lock on the checkout key, on ONE pooled
- * connection that `fn` also uses for its queries — so a checkout never holds
- * two connections and a busy pool cannot deadlock on itself.
- */
-async function withCheckoutLock<T>(db: Db, key: string, fn: (db: Db) => Promise<T>): Promise<T> {
-  const client = await db.$client.connect();
-  const lockKey = `checkout:${key}`;
-  try {
-    await client.query("SELECT pg_advisory_lock(hashtextextended($1, 0))", [lockKey]);
-    try {
-      return await fn(drizzle(client, { schema }) as unknown as Db);
-    } finally {
-      await client.query("SELECT pg_advisory_unlock(hashtextextended($1, 0))", [lockKey]);
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+export async function placeOrder(deps: Deps, input: PlaceOrderInput): Promise<{ order: OrderRow; replayed: boolean }> {
+  // Attempts with the same idempotency key never overlap: an agent that times
+  // out and resends while its first attempt is still charging the card must
+  // see that attempt's outcome (an order, or a voided charge), not race it.
+  // The first attempt claims the key with a row; a second one polls — holding
+  // no database connection — until the claim is gone, then decides on what
+  // the first attempt left behind.
+  const deadline = Date.now() + CLAIM_WAIT_MS;
+  for (;;) {
+    const previous = await getOrderByIdempotencyKey(deps.db, input.idempotencyKey);
+    if (previous) {
+      if (previous.userId !== (input.userId ?? null)) throw new OrderError("This checkout was already used. Start a new one.");
+      return { order: previous, replayed: true };
     }
+    if (await claimCheckout(deps.db, input.idempotencyKey, Date.now(), CLAIM_STALE_MS)) break;
+    if (Date.now() >= deadline) {
+      throw new OrderError("This checkout is still being processed. Try again in a moment with the same idempotency key.");
+    }
+    await sleep(CLAIM_POLL_MS);
+  }
+  try {
+    return await placeOrderOnce(deps, input);
   } finally {
-    client.release();
+    await releaseCheckout(deps.db, input.idempotencyKey);
   }
 }
 
