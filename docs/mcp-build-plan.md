@@ -1,6 +1,6 @@
 # MCP build plan — TicketBay v2, course module 6
 
-Branch `app/v2-mcp` from `app/v2`. Local only: small commits, never pushed.
+Built 2026-09-25 on a local branch, then fast-forwarded into `main` and pushed.
 Decisions come from the grilling on 2026-09-25 (see "Decisions") and from
 `second-brain/docs/crash-course-content/m6/notes.md`.
 
