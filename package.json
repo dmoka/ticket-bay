@@ -2,7 +2,7 @@
   "name": "ticketbay",
   "version": "2.0.0",
   "private": true,
-  "description": "TicketBay — the reference ticketing app for the AI Agent Engineer course",
+  "description": "TicketBay \u2014 the reference ticketing app for the AI Agent Engineer course",
   "type": "module",
   "scripts": {
     "dev": "next dev",
@@ -14,6 +14,7 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "tsx scripts/migrate.ts",
     "db:seed": "tsx scripts/seed.ts",
+    "mcp:local": "tsx mcp/server.ts",
     "test": "vitest run",
     "test:unit": "vitest run --config vitest.unit.config.ts",
     "test:domain": "vitest run --config vitest.unit.config.ts tests/domain",
