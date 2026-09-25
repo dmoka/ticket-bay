@@ -29,6 +29,17 @@ export const KEY_SCOPES = {
 } as const;
 export type KeyScope = keyof typeof KEY_SCOPES;
 
+/** What a key without stored permissions may do — the same default new keys get. */
+export const DEFAULT_KEY_PERMISSIONS = { tickets: ["read", "write"] } as const;
+
+/**
+ * A key's scopes. A key with no stored permissions (NULL: made before scopes
+ * existed) gets the default, read & write — it must not silently go dead.
+ */
+export function keyScopes(permissions: unknown): string[] {
+  return permissions === null || permissions === undefined ? scopesOf(DEFAULT_KEY_PERMISSIONS) : scopesOf(permissions);
+}
+
 /** "tickets:read", "tickets:write" — a key's permissions as flat scopes. */
 export function scopesOf(permissions: unknown): string[] {
   const p = typeof permissions === "string" ? safeJson(permissions) : permissions;
@@ -65,7 +76,7 @@ export function createAuth(db: Db, { baseURL, secret }: AuthOptions) {
         // The plugin's default is 10 requests a day — far too low for an agent.
         rateLimit: { enabled: true, timeWindow: 60_000, maxRequests: 120 },
         // A key made without a choice acts as you: read and write.
-        permissions: { defaultPermissions: { tickets: ["read", "write"] } },
+        permissions: { defaultPermissions: { tickets: [...DEFAULT_KEY_PERMISSIONS.tickets] } },
       }),
       nextCookies(),
     ],

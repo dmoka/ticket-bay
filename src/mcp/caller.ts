@@ -10,7 +10,7 @@
 // is refused, so a revoked agent notices instead of silently losing its
 // private tools.
 import { eq } from "drizzle-orm";
-import { API_KEY_PREFIX, scopesOf, type Auth } from "../auth/auth";
+import { API_KEY_PREFIX, keyScopes, type Auth } from "../auth/auth";
 import type { Db } from "../db/client";
 import { user } from "../db/schema";
 import type { Caller } from "./tools";
@@ -32,7 +32,7 @@ async function fromApiKey({ auth, db }: CallerDeps, key: string): Promise<Caller
   if (!owner || owner.banned) return { ok: false, error: "The account behind this API key is not active." };
   return {
     ok: true,
-    caller: { userId: owner.id, email: owner.email, name: owner.name, role: owner.role ?? null, scopes: scopesOf(res.key.permissions) },
+    caller: { userId: owner.id, email: owner.email, name: owner.name, role: owner.role ?? null, scopes: keyScopes(res.key.permissions) },
   };
 }
 

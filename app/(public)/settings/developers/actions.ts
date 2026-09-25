@@ -3,7 +3,7 @@
 import { headers } from "next/headers";
 import { revalidatePath } from "next/cache";
 import { getAuth, getSession } from "@/lib/auth";
-import { KEY_SCOPES, scopesOf, type KeyScope } from "@/src/auth/auth";
+import { KEY_SCOPES, keyScopes, type KeyScope } from "@/src/auth/auth";
 
 // Settings → Developers. Every call runs as the signed-in user: list, get and
 // delete pass the request headers, so Better Auth scopes them to the session.
@@ -22,7 +22,7 @@ function message(e: unknown): string {
 export async function createKeyAction(name: string, scope: KeyScope): Promise<NewKey> {
   const clean = name.trim();
   if (!clean) return { ok: false, error: "Give the key a name, e.g. “Claude Code”." };
-  if (!(scope in KEY_SCOPES)) return { ok: false, error: "Choose what the key may do." };
+  if (!Object.hasOwn(KEY_SCOPES, scope)) return { ok: false, error: "Choose what the key may do." };
   const session = await getSession();
   if (!session) return { ok: false, error: "Sign in again to create a key." };
   try {
@@ -53,7 +53,7 @@ export async function rotateKeyAction(keyId: string): Promise<NewKey> {
     const auth = getAuth();
     const old = await auth.api.getApiKey({ query: { id: keyId }, headers: h });
     const name = old.name ?? "API key";
-    const tickets = scopesOf(old.permissions).filter((s) => s.startsWith("tickets:")).map((s) => s.slice("tickets:".length));
+    const tickets = keyScopes(old.permissions).filter((s) => s.startsWith("tickets:")).map((s) => s.slice("tickets:".length));
     // getApiKey above only returns the caller's own key, so old.referenceId is the signed-in user.
     const created = await auth.api.createApiKey({ body: { name, userId: old.referenceId, permissions: { tickets } } });
     await auth.api.deleteApiKey({ body: { keyId }, headers: h });

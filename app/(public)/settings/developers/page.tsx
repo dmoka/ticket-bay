@@ -1,6 +1,6 @@
 import { headers } from "next/headers";
 import { getAuth, requireSession, appBaseURL } from "@/lib/auth";
-import { mcpEndpoint, scopesOf } from "@/src/auth/auth";
+import { keyScopes, mcpEndpoint } from "@/src/auth/auth";
 import { SectionLabel } from "@/components/app/primitives";
 import { ApiKeysPanel, type KeyRow } from "./api-keys-panel";
 
@@ -17,7 +17,7 @@ export default async function DevelopersPage() {
     start: k.start ?? "tb_",
     createdAt: new Date(k.createdAt).getTime(),
     lastUsedAt: k.lastRequest ? new Date(k.lastRequest).getTime() : null,
-    canWrite: scopesOf(k.permissions).includes("tickets:write"),
+    canWrite: keyScopes(k.permissions).includes("tickets:write"),
   }));
   const endpoint = mcpEndpoint(appBaseURL());
 

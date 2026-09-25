@@ -4,6 +4,7 @@ import { getDb } from "@/src/db/client";
 import { cancelImpact } from "@/src/db/admin-queries";
 import { getEvent } from "@/src/db/events-repo";
 import { now } from "@/lib/clock";
+import { requireSession } from "@/lib/auth";
 import { date, money, num, time } from "@/lib/format";
 import { Mono, PageHeader } from "@/components/app/primitives";
 import { CancelEventForm } from "../../cancel-event-form";
@@ -24,6 +25,10 @@ export default async function CancelEventPage({
 }) {
   const { id } = await params;
   const { via } = await searchParams;
+  // The admin layout already gates /admin; check here too, so this page's
+  // numbers never render for anyone else, however the page is requested.
+  const session = await requireSession(`/admin/events/${id}/cancel`);
+  if (session.user.role !== "admin") notFound();
   const ev = await getEvent(getDb(), id);
   if (!ev) notFound();
   const nowMs = await now();
