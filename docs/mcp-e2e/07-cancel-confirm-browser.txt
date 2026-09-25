@@ -1,0 +1,18 @@
+signed-out visit went to: http://localhost:3100/sign-in?next=%2Fadmin%2Fevents%2Fcomedy-cellar-open-mic%2Fcancel%3Fvia%3Dmcp
+
+cancel page:
+Events / Cancel
+Cancel Comedy Cellar Open Mic?
+
+Thu, 29 Oct 2026 21:00 · Kisüzem, Budapest
+
+An AI agent prepared this. Nothing has changed yet — you decide.
+Ticket sales stop at once
+4 paid orders, 19 tickets, are refunded
+€241.50 goes back to customers — the full ticket price, no refund fee
+Type comedy-cellar-open-mic to confirm
+Keep the event
+Cancel event and refund everyone
+
+after confirming, url: http://localhost:3100/admin/events?cancelled=comedy-cellar-open-mic
+banner: Comedy Cellar Open Mic is cancelled. Sales are closed and 4 orders are refunded, €241.50 in total.
