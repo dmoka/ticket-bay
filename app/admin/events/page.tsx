@@ -17,6 +17,7 @@ export default async function AdminEvents({ searchParams }: { searchParams: Prom
   // Deep link from the cancel_event MCP tool (or the row's Cancel… link).
   const toCancel = rows.find((r) => r.event.id === sp.cancel && r.event.cancelledAtMs === null && r.event.startsAtMs > nowMs)?.event;
   const impact = toCancel ? await cancelImpact(getDb(), toCancel.id) : null;
+  const justCancelled = rows.find((r) => r.event.id === sp.cancel && r.event.cancelledAtMs !== null);
   const capacity = rows.reduce((s, r) => s + r.event.totalSeats, 0);
   const sold = rows.reduce((s, r) => s + r.event.seatsSold, 0);
 
@@ -30,6 +31,12 @@ export default async function AdminEvents({ searchParams }: { searchParams: Prom
           </>
         }
       />
+      {justCancelled && (
+        <div role="status" className="mb-4 rounded-md border border-emerald-200 bg-emerald-50/70 px-3 py-2 dark:border-emerald-900 dark:bg-emerald-950/30">
+          {justCancelled.event.name} is cancelled. Sales are closed and {num(justCancelled.refunds)} orders are refunded, <Mono>{money(justCancelled.refundedCents)}</Mono> in
+          total.
+        </div>
+      )}
       {toCancel && impact && (
         <CancelEventDialog
           key={toCancel.id}
