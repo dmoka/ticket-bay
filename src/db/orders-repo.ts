@@ -42,6 +42,26 @@ export async function listOrdersByEmail(db: DbLike, email: string): Promise<{ or
   return rows.map((r) => ({ order: r.orders, event: r.events }));
 }
 
+export async function listOrdersByUser(db: DbLike, userId: string): Promise<{ order: OrderRow; event: EventRow }[]> {
+  const rows = await db
+    .select()
+    .from(orders)
+    .innerJoin(events, eq(orders.eventId, events.id))
+    .where(eq(orders.userId, userId))
+    .orderBy(desc(orders.createdAtMs));
+  return rows.map((r) => ({ order: r.orders, event: r.events }));
+}
+
+/** Every still-paid order of an event, row-locked until the transaction ends. */
+export async function listPaidOrdersForUpdate(tx: DbLike, eventId: string): Promise<OrderRow[]> {
+  return tx
+    .select()
+    .from(orders)
+    .where(and(eq(orders.eventId, eventId), eq(orders.status, "paid")))
+    .orderBy(orders.id)
+    .for("update");
+}
+
 /**
  * The refund module's view of a stored order: what was paid for the tickets
  * (the service fee is not refundable) and when the event starts.

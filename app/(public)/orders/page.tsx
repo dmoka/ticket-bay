@@ -1,30 +1,23 @@
 import Link from "next/link";
-import { cookies } from "next/headers";
 import { getDb } from "@/src/db/client";
-import { listOrdersByEmail } from "@/src/db/orders-repo";
+import { listOrdersByUser } from "@/src/db/orders-repo";
+import { requireSession } from "@/lib/auth";
 import { dateTime, date, money, orderNumber } from "@/lib/format";
 import { StatusBadge } from "@/components/app/primitives";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 
 export const metadata = { title: "My orders" };
 
-export default async function MyOrdersPage({ searchParams }: { searchParams: Promise<{ email?: string }> }) {
-  const sp = await searchParams;
-  const email = (sp.email ?? (await cookies()).get("tb-email")?.value ?? "").trim().toLowerCase();
-  const rows = email ? await listOrdersByEmail(getDb(), email) : [];
+export default async function MyOrdersPage() {
+  const session = await requireSession("/orders");
+  const email = session.user.email;
+  const rows = await listOrdersByUser(getDb(), session.user.id);
 
   return (
     <div>
       <h1 className="text-2xl font-semibold tracking-tight">My orders</h1>
-      <p className="mt-1.5 text-muted-foreground">No account needed — look up your orders by the email you booked with.</p>
+      <p className="mt-1.5 text-muted-foreground">Every order you booked with this account.</p>
 
-      <form method="get" className="mt-6 flex max-w-md items-center gap-2">
-        <Input name="email" type="email" aria-label="Email" defaultValue={email} placeholder="you@example.com" required />
-        <Button type="submit">Find orders</Button>
-      </form>
-
-      {email && (
+      {(
         <div className="mt-8">
           <div className="mb-3 text-[13px] text-muted-foreground">
             {rows.length} {rows.length === 1 ? "order" : "orders"} for <span className="font-mono text-foreground">{email}</span>
@@ -62,7 +55,7 @@ export default async function MyOrdersPage({ searchParams }: { searchParams: Pro
                 {rows.length === 0 && (
                   <tr>
                     <td colSpan={6} className="px-4 py-10 text-center text-muted-foreground">
-                      No orders for this email yet.
+                      No orders yet — find an event and book your first tickets.
                     </td>
                   </tr>
                 )}

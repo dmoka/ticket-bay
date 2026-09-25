@@ -1,16 +1,18 @@
 "use server";
 
-import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { getDb } from "@/src/db/client";
 import { getPayments, PaymentError } from "@/src/payments";
 import { OrderError, placeOrder } from "@/src/services/orders";
 import { now } from "@/lib/clock";
+import { getSession } from "@/lib/auth";
 
 export type CheckoutState = { error?: string };
 
 export async function placeOrderAction(_prev: CheckoutState, form: FormData): Promise<CheckoutState> {
   const field = (k: string) => String(form.get(k) ?? "");
+  const session = await getSession();
+  if (!session) return { error: "Sign in to book tickets." };
   let orderId: number;
   try {
     const { order } = await placeOrder(
@@ -18,7 +20,8 @@ export async function placeOrderAction(_prev: CheckoutState, form: FormData): Pr
       {
         eventId: field("eventId"),
         quantity: Number(field("qty")),
-        email: field("email"),
+        email: session.user.email,
+        userId: session.user.id,
         name: field("name"),
         code: field("code"),
         idempotencyKey: field("idempotencyKey"),
@@ -29,7 +32,5 @@ export async function placeOrderAction(_prev: CheckoutState, form: FormData): Pr
     if (e instanceof OrderError || e instanceof PaymentError) return { error: e.message };
     throw e;
   }
-  // Demo identity: "My orders" finds orders by the last email used here.
-  (await cookies()).set("tb-email", field("email").trim().toLowerCase(), { path: "/", maxAge: 60 * 60 * 24 * 365 });
   redirect(`/orders/${orderId}?placed=1`);
 }

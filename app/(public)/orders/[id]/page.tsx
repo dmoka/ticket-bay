@@ -5,6 +5,7 @@ import { getDb } from "@/src/db/client";
 import { getOrderWithEvent, toDomainOrder } from "@/src/db/orders-repo";
 import { previewCancellation } from "@/src/domain/cancellation";
 import { now } from "@/lib/clock";
+import { requireSession } from "@/lib/auth";
 import { date, dateTime, money, orderNumber, time } from "@/lib/format";
 import { SectionLabel, StatusBadge } from "@/components/app/primitives";
 import { InvoiceLines } from "@/components/public/invoice-lines";
@@ -23,8 +24,10 @@ export default async function OrderPage({
 }) {
   const id = Number((await params).id);
   const { placed } = await searchParams;
+  const session = await requireSession(`/orders/${(await params).id}`);
   const found = Number.isSafeInteger(id) ? await getOrderWithEvent(getDb(), id) : undefined;
-  if (!found) notFound();
+  // Someone else's order is simply not found: an order number leaks nothing.
+  if (!found || found.order.userId !== session.user.id) notFound();
   const { order, event: ev } = found;
   const nowMs = await now();
   const preview = order.status === "paid" ? previewCancellation(toDomainOrder(order, ev), nowMs) : null;
@@ -37,15 +40,14 @@ export default async function OrderPage({
           <div>
             <div className="font-medium">Payment confirmed — you&apos;re going to {ev.name}.</div>
             <div className="mt-0.5 text-[13px] text-muted-foreground">
-              {order.quantity} {order.quantity === 1 ? "ticket" : "tickets"} for {order.customerName}. Find this order any time under My orders with{" "}
-              <span className="font-mono">{order.customerEmail}</span>.
+              {order.quantity} {order.quantity === 1 ? "ticket" : "tickets"} for {order.customerName}. Find this order any time under My orders.
             </div>
           </div>
         </div>
       )}
 
       <nav className="mb-6 text-[13px] text-muted-foreground">
-        <Link href={`/orders?email=${encodeURIComponent(order.customerEmail)}`} className="hover:text-foreground">
+        <Link href="/orders" className="hover:text-foreground">
           My orders
         </Link>
         <span className="mx-1.5">/</span>

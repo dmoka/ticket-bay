@@ -46,3 +46,7 @@ export async function adjustSeatsSold(db: DbLike, id: string, delta: number): Pr
     .set({ seatsSold: sql`${events.seatsSold} + ${delta}` })
     .where(eq(events.id, id));
 }
+
+export async function markEventCancelled(tx: DbLike, id: string, atMs: number): Promise<void> {
+  await tx.update(events).set({ cancelledAtMs: atMs }).where(eq(events.id, id));
+}

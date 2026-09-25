@@ -1,11 +1,11 @@
 import Link from "next/link";
 import { randomUUID } from "node:crypto";
-import { cookies } from "next/headers";
 import { notFound } from "next/navigation";
 import { getDb } from "@/src/db/client";
 import { getEvent } from "@/src/db/events-repo";
 import { checkCode, OrderError, quoteOrder, type QuoteResult } from "@/src/services/orders";
 import { now } from "@/lib/clock";
+import { requireSession } from "@/lib/auth";
 import { date, money, time } from "@/lib/format";
 import { SectionLabel } from "@/components/app/primitives";
 import { InvoiceLines } from "@/components/public/invoice-lines";
@@ -30,6 +30,8 @@ export default async function CheckoutPage({
   const nowMs = await now();
   const qty = Number(sp.qty ?? 1);
   const rawCode = (sp.code ?? "").trim();
+  const back = new URLSearchParams({ ...(sp.qty ? { qty: sp.qty } : {}), ...(rawCode ? { code: rawCode } : {}) }).toString();
+  const session = await requireSession(`/events/${id}/checkout${back ? `?${back}` : ""}`);
 
   const codeCheck = rawCode ? await checkCode({ db, nowMs }, rawCode) : null;
   const codeError = codeCheck && !codeCheck.ok ? codeCheck.reason : null;
@@ -43,7 +45,6 @@ export default async function CheckoutPage({
     error = e.message;
   }
   const appliedCode = result?.code?.code ?? "";
-  const email = (await cookies()).get("tb-email")?.value ?? "";
 
   return (
     <div>
@@ -71,7 +72,8 @@ export default async function CheckoutPage({
               idempotencyKey={randomUUID()}
               payLabel={result ? `Pay ${money(result.invoice.totalCents)}` : "Pay"}
               disabled={!result}
-              defaultEmail={email}
+              email={session.user.email}
+              defaultName={session.user.name}
             />
           </div>
         </section>

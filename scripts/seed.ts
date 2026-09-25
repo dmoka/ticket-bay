@@ -5,9 +5,10 @@
 import { previewCancellation } from "../src/domain/cancellation";
 import { buildInvoice } from "../src/domain/invoice";
 import type { Event } from "../src/domain/booking";
-import { sql } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
+import { createAuth } from "../src/auth/auth";
 import { closeDb, databaseUrl, migrateDb, openDb } from "../src/db/client";
-import { discountCodes, events, orders } from "../src/db/schema";
+import { discountCodes, events, orders, user } from "../src/db/schema";
 import { loadLocalEnv } from "./local-env";
 
 const HOUR = 3_600_000;
@@ -54,7 +55,7 @@ const EVENTS: SeedEvent[] = [
     inDays: 12,
     hour: 20,
     seats: 300,
-    priceCents: 5900,
+    priceCents: 4500,
     sell: 0.62,
   },
   {
@@ -168,7 +169,12 @@ const CUSTOMERS = Array.from({ length: 140 }, () => {
   const ascii = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
   return { name: `${first} ${last}`, email: `${ascii(first)}.${ascii(last)}@${pick(DOMAINS)}` };
 });
-export const DEMO_CUSTOMER = { name: "Alex Morgan", email: "alex.morgan@example.com" };
+// The demo accounts. Anna has a history worth showing on "My orders"; Ben has
+// one order, so the MCP demo can show that Ben's key never sees Anna's.
+export const DEMO_PASSWORD = "ticketbay-demo";
+export const DEMO_CUSTOMER = { name: "Anna Kovács", email: "anna@ticketbay.test" };
+export const DEMO_CUSTOMER_B = { name: "Ben Weber", email: "ben@ticketbay.test" };
+export const DEMO_ADMIN = { name: "Olivia Admin", email: "admin@ticketbay.test" };
 
 function quantity(): number {
   const r = rand();
@@ -224,6 +230,10 @@ demo("midnight-arcade-neon-tour", 2, 9);
 demo("craftconf-agents-in-production", 1, 21);
 demo("velvet-static-live", 2, 35);
 demo("comedy-cellar-open-mic", 4, 3);
+{
+  const ev = EVENTS.find((e) => e.id === "balaton-sound-weekend")!;
+  drafts.push({ ev, startMs: startOf(ev), qty: 2, createdAtMs: NOW - 6 * DAY, customer: DEMO_CUSTOMER_B });
+}
 
 drafts.sort((a, b) => a.createdAtMs - b.createdAtMs);
 
@@ -272,7 +282,7 @@ for (const d of drafts) {
 
   // 3. Some customers cancel. Sold-out shows stay sold out; the demo customer
   // cancels exactly one order (the past one, after the fact — refund 0).
-  const isDemo = d.customer === DEMO_CUSTOMER;
+  const isDemo = d.customer === DEMO_CUSTOMER || d.customer === DEMO_CUSTOMER_B;
   const late = d.ev.inDays < 0 && (isDemo || rand() < 0.03);
   const early = !isDemo && d.ev.sell < 1 && rand() < 0.08;
   if (late || early) {
@@ -298,6 +308,19 @@ for (const d of drafts) {
   if (holdsSeats) seatsSold.set(d.ev.id, (seatsSold.get(d.ev.id) ?? 0) + d.qty);
   rows.push(row);
 }
+
+// 4. The demo accounts, created through Better Auth itself (it hashes the
+// password). Wipe every account first: user rows cascade to sessions, API keys
+// and OAuth grants.
+await db.execute(sql`TRUNCATE ${orders}, ${user} CASCADE`);
+const auth = createAuth(db, { baseURL: process.env.BETTER_AUTH_URL ?? "http://localhost:3000", secret: process.env.BETTER_AUTH_SECRET! });
+const accountIds = new Map<string, string>();
+for (const a of [DEMO_CUSTOMER, DEMO_CUSTOMER_B, DEMO_ADMIN]) {
+  const res = await auth.api.signUpEmail({ body: { name: a.name, email: a.email, password: DEMO_PASSWORD } });
+  accountIds.set(a.email, res.user.id);
+}
+await db.update(user).set({ role: "admin" }).where(eq(user.email, DEMO_ADMIN.email));
+for (const row of rows) row.userId = accountIds.get(row.customerEmail) ?? null;
 
 await db.transaction(async (tx) => {
   // RESTART IDENTITY: order numbers start again at TB-00001 on every reseed.
@@ -325,4 +348,4 @@ await closeDb(db);
 
 const refunded = rows.filter((r) => r.status === "refunded").length;
 console.log(`seeded ${new URL(databaseUrl()).pathname.slice(1)}: ${EVENTS.length} events, ${rows.length} orders (${refunded} refunded), ${CODES.length} discount codes`);
-console.log(`demo customer: ${DEMO_CUSTOMER.email}`);
+console.log(`demo accounts (password "${DEMO_PASSWORD}"): ${DEMO_CUSTOMER.email}, ${DEMO_CUSTOMER_B.email}, ${DEMO_ADMIN.email} (admin)`);

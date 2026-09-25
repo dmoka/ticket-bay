@@ -7,9 +7,11 @@ import { checkDiscountCode, normalizeCode, quote, type CodeCheck } from "../doma
 import type { Invoice } from "../domain/invoice";
 import type { Db } from "../db/client";
 import { getCode, getCodeForUpdate, incrementUses, toDomainCode } from "../db/codes-repo";
-import { adjustSeatsSold, getEvent, getEventForUpdate, toDomainEvent } from "../db/events-repo";
+import { adjustSeatsSold, getEvent, getEventForUpdate, markEventCancelled, toDomainEvent } from "../db/events-repo";
 import {
+  getOrder,
   getOrderByIdempotencyKey,
+  listPaidOrdersForUpdate,
   getOrderWithEvent,
   insertOrder,
   markRefunded,
@@ -64,6 +66,7 @@ export async function checkCode(deps: Pick<Deps, "db" | "nowMs">, rawCode: strin
 export async function quoteOrder(deps: Pick<Deps, "db" | "nowMs">, eventId: string, quantity: number, rawCode = ""): Promise<QuoteResult> {
   const ev = await getEvent(deps.db, eventId);
   if (!ev) throw new OrderError("Event not found.");
+  if (ev.cancelledAtMs !== null) throw new OrderError("This event has been cancelled.");
   let code: QuoteResult["code"] = null;
   if (rawCode.trim()) {
     const check = await checkCode(deps, rawCode);
@@ -85,12 +88,18 @@ export interface PlaceOrderInput {
   code?: string;
   /** one per checkout page view — a double submit must not charge twice */
   idempotencyKey: string;
+  /** the signed-in account placing the order (the app and the MCP server always pass one) */
+  userId?: string;
 }
 
 export async function placeOrder(deps: Deps, input: PlaceOrderInput): Promise<{ order: OrderRow; replayed: boolean }> {
   const { db, payments, nowMs } = deps;
   const previous = await getOrderByIdempotencyKey(db, input.idempotencyKey);
-  if (previous) return { order: previous, replayed: true };
+  if (previous) {
+    // A replay only ever returns the caller's own order.
+    if (previous.userId !== (input.userId ?? null)) throw new OrderError("This checkout was already used. Start a new one.");
+    return { order: previous, replayed: true };
+  }
 
   const email = input.email.trim().toLowerCase();
   const name = input.name.trim();
@@ -113,6 +122,7 @@ export async function placeOrder(deps: Deps, input: PlaceOrderInput): Promise<{ 
       // the last seats while the card was being charged. The row lock makes a
       // concurrent checkout for the same event wait here until this one commits.
       const fresh = (await getEventForUpdate(tx, input.eventId))!;
+      if (fresh.cancelledAtMs !== null) throw new OrderError("This event has been cancelled.");
       try {
         bookTickets(toDomainEvent(fresh), input.quantity);
       } catch (e) {
@@ -128,6 +138,7 @@ export async function placeOrder(deps: Deps, input: PlaceOrderInput): Promise<{ 
       await adjustSeatsSold(tx, input.eventId, input.quantity);
       return insertOrder(tx, {
         eventId: input.eventId,
+        userId: input.userId ?? null,
         customerEmail: email,
         customerName: name,
         quantity: input.quantity,
@@ -196,5 +207,60 @@ export async function cancelOrder(deps: Deps, orderId: number): Promise<CancelRe
     refundCents: result.preview.netCents,
     refundFeeCents: result.preview.feeCents,
     seatsReleased: result.preview.releasesSeats,
+  };
+}
+
+/**
+ * Cancel an order on behalf of one account. Someone else's order is "not
+ * found" — never "not yours" — so an order number leaks nothing.
+ */
+export async function cancelOwnOrder(deps: Deps, userId: string, orderId: number): Promise<CancelResult> {
+  const found = Number.isSafeInteger(orderId) ? await getOrder(deps.db, orderId) : undefined;
+  if (!found || found.userId !== userId) throw new OrderError("Order not found.");
+  return cancelOrder(deps, orderId);
+}
+
+export interface CancelEventResult {
+  event: EventRow;
+  refundedOrders: number;
+  refundedCents: number;
+}
+
+/**
+ * The organiser calls the event off: sales stop and every paid order gets its
+ * whole ticket amount back — no refund fee, no time window, because the
+ * customer did nothing wrong. (The service fee stays with the platform, as it
+ * does for every refund; the schema caps a refund at the ticket amount.)
+ * Admin-only — callers check the role.
+ */
+export async function cancelEvent(deps: Deps, eventId: string): Promise<CancelEventResult> {
+  const { db, payments, nowMs } = deps;
+  const refunds = await db.transaction(async (tx) => {
+    // Event lock first: no checkout can add a paid order behind our back. A
+    // customer refunding at the same moment locks order-then-event; Postgres
+    // detects that deadlock and aborts one side, which the caller can retry.
+    const ev = await getEventForUpdate(tx, eventId);
+    if (!ev) throw new OrderError("Event not found.");
+    if (ev.cancelledAtMs !== null) throw new OrderError("This event is already cancelled.");
+    await markEventCancelled(tx, eventId, nowMs);
+    const paid = await listPaidOrdersForUpdate(tx, eventId);
+    for (const o of paid) {
+      const won = await markRefunded(tx, o.id, { atMs: nowMs, refundCents: o.ticketsCents, refundFeeCents: 0, seatsReleased: true });
+      if (!won) throw new OrderError(`Order ${o.id} changed while cancelling. Try again.`);
+      await adjustSeatsSold(tx, eventId, -o.quantity);
+    }
+    return paid.map((o) => ({ id: o.id, paymentId: o.paymentId, cents: o.ticketsCents }));
+  });
+
+  for (const r of refunds) {
+    if (r.cents > 0) {
+      const refund = await payments.refund(r.paymentId, r.cents, `event-cancel-${r.id}`);
+      await setRefundId(db, r.id, refund.id);
+    }
+  }
+  return {
+    event: (await getEvent(db, eventId))!,
+    refundedOrders: refunds.length,
+    refundedCents: refunds.reduce((sum, r) => sum + r.cents, 0),
   };
 }

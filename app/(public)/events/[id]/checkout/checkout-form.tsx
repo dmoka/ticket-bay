@@ -14,7 +14,8 @@ export function CheckoutForm({
   idempotencyKey,
   payLabel,
   disabled,
-  defaultEmail,
+  email,
+  defaultName,
 }: {
   eventId: string;
   qty: number;
@@ -22,7 +23,8 @@ export function CheckoutForm({
   idempotencyKey: string;
   payLabel: string;
   disabled: boolean;
-  defaultEmail: string;
+  email: string;
+  defaultName: string;
 }) {
   const [state, action, pending] = useActionState<CheckoutState, FormData>(placeOrderAction, {});
   return (
@@ -33,11 +35,12 @@ export function CheckoutForm({
       <input type="hidden" name="idempotencyKey" value={idempotencyKey} />
       <div className="space-y-1.5">
         <Label htmlFor="email">Email</Label>
-        <Input id="email" name="email" type="email" required autoComplete="email" defaultValue={defaultEmail} placeholder="you@example.com" />
+        <Input id="email" type="email" value={email} readOnly className="bg-muted/40 text-muted-foreground" />
+        <p className="text-[12px] text-muted-foreground">Tickets go to your account email.</p>
       </div>
       <div className="space-y-1.5">
         <Label htmlFor="name">Name on tickets</Label>
-        <Input id="name" name="name" required autoComplete="name" placeholder="Alex Morgan" />
+        <Input id="name" name="name" required autoComplete="name" defaultValue={defaultName} placeholder="Anna Kovács" />
       </div>
       <div className="space-y-1.5">
         <Label>Card</Label>
