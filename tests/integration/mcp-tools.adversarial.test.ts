@@ -268,7 +268,7 @@ describe("ADVERSARIAL search_docs over MCP (public, anonymous)", () => {
     [{ query: "refund", limit: 2.5 }, "fractional limit"],
     [{ query: ["refund"] }, "array query"],
     [{ query: { $ne: "" } }, "object query"],
-  ])("rejects %j (%s) cleanly", async (args) => {
+  ])("rejects %j (%s) cleanly", async (args: unknown, _label: string) => {
     const r = await call(null, "search_docs", args as Record<string, unknown>);
     expect(isToolError(r)).toBeTruthy();
     expect(r.status).toBeLessThan(500);

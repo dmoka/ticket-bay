@@ -149,6 +149,7 @@ describe("ADVERSARIAL Settings → Developers: one user cannot touch another's k
 });
 
 // ---- Scope change: key scopes (read vs read & write) --------------------------
+// Rotation through the REAL rotateKeyAction lives in mcp-key-actions.adversarial.test.ts.
 
 /** A browser-style HTTP call to Better Auth's own endpoints (NOT a server call). */
 async function http(path: string, body: unknown, headers: Record<string, string>) {
@@ -239,30 +240,5 @@ describe("ADVERSARIAL key scopes: a key's scope can only come from the server", 
     await t.db.update(apikey).set({ permissions: null }).where(eq(apikey.id, k.id));
     const r = await resolve(`Bearer ${k.key}`);
     expect(r.ok && [...r.caller!.scopes].sort()).toEqual(["tickets:read", "tickets:write"]);
-  });
-
-  it("rotating a key with no stored permissions (as rotateKeyAction does) gives a working read & write key", async () => {
-    const a = await signUp();
-    const k = await keyFor(a);
-    await t.db.update(apikey).set({ permissions: null }).where(eq(apikey.id, k.id));
-    const old = await auth.api.getApiKey({ query: { id: k.id }, headers: a.headers });
-    const { scopesOf } = await import("../../src/auth/auth");
-    const tickets = scopesOf(old.permissions).filter((s) => s.startsWith("tickets:")).map((s) => s.slice("tickets:".length));
-    const created = await auth.api.createApiKey({ body: { name: old.name ?? "k", userId: old.referenceId, permissions: { tickets } } });
-    const r = await resolve(`Bearer ${created.key}`);
-    expect(r.ok && [...r.caller!.scopes].sort()).toEqual(["tickets:read", "tickets:write"]);
-  });
-
-  it("rotation as rotateKeyAction does it keeps a read-only key read-only", async () => {
-    const a = await signUp();
-    const ro = await readOnlyKey(a);
-    const old = await auth.api.getApiKey({ query: { id: ro.id }, headers: a.headers });
-    const { scopesOf } = await import("../../src/auth/auth");
-    const tickets = scopesOf(old.permissions).filter((s) => s.startsWith("tickets:")).map((s) => s.slice("tickets:".length));
-    const created = await auth.api.createApiKey({ body: { name: old.name ?? "k", userId: old.referenceId, permissions: { tickets } } });
-    await auth.api.deleteApiKey({ body: { keyId: ro.id }, headers: a.headers });
-    const r = await resolve(`Bearer ${created.key}`);
-    expect(r.ok && r.caller!.scopes).toEqual(["tickets:read"]);
-    expect(r.ok && r.caller!.userId).toBe(a.id);
   });
 });
