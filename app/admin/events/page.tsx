@@ -20,7 +20,7 @@ export default async function AdminEvents({ searchParams }: { searchParams: Prom
   const toCancel = rows.find((r) => r.event.id === sp.cancel && r.event.cancelledAtMs === null && r.event.startsAtMs > nowMs)?.event;
   const impact = toCancel ? await cancelImpact(getDb(), toCancel.id) : null;
   const justCancelled = rows.find((r) => r.event.id === sp.cancel && r.event.cancelledAtMs !== null);
-  const unpaid = justCancelled ? (await listUnpaidCancelRefunds(getDb(), justCancelled.event.id, justCancelled.event.cancelledAtMs!)).length : 0;
+  const unpaid = justCancelled ? (await listUnpaidCancelRefunds(getDb(), justCancelled.event.id)).length : 0;
   const capacity = rows.reduce((s, r) => s + r.event.totalSeats, 0);
   const sold = rows.reduce((s, r) => s + r.event.seatsSold, 0);
 

@@ -62,18 +62,18 @@ export async function listPaidOrdersForUpdate(tx: DbLike, eventId: string): Prom
     .for("update");
 }
 
-/** The orders an event cancellation refunded (all marked at the cancel instant). */
-export async function listCancelRefunds(db: DbLike, eventId: string, cancelledAtMs: number): Promise<OrderRow[]> {
+/** The orders an event cancellation refunded. */
+export async function listCancelRefunds(db: DbLike, eventId: string): Promise<OrderRow[]> {
   return db
     .select()
     .from(orders)
-    .where(and(eq(orders.eventId, eventId), eq(orders.status, "refunded"), eq(orders.refundedAtMs, cancelledAtMs), eq(orders.refundFeeCents, 0)))
+    .where(and(eq(orders.eventId, eventId), eq(orders.refundReason, "event_cancelled")))
     .orderBy(orders.id);
 }
 
 /** …of those, the ones whose money has not reached the provider yet. */
-export async function listUnpaidCancelRefunds(db: DbLike, eventId: string, cancelledAtMs: number): Promise<OrderRow[]> {
-  return (await listCancelRefunds(db, eventId, cancelledAtMs)).filter((o) => o.refundId === null && (o.refundCents ?? 0) > 0);
+export async function listUnpaidCancelRefunds(db: DbLike, eventId: string): Promise<OrderRow[]> {
+  return (await listCancelRefunds(db, eventId)).filter((o) => o.refundId === null && (o.refundCents ?? 0) > 0);
 }
 
 /** Order ids are Postgres INTEGERs: anything else cannot name an order. */
@@ -95,6 +95,8 @@ export function toDomainOrder(order: OrderRow, event: Pick<EventRow, "startsAtMs
 }
 
 export interface RefundRecord {
+  /** defaults to "customer" */
+  reason?: "customer" | "event_cancelled";
   atMs: number;
   refundCents: number;
   refundFeeCents: number;
@@ -117,6 +119,7 @@ export async function markRefunded(db: DbLike, id: number, r: RefundRecord): Pro
       refundCents: r.refundCents,
       refundFeeCents: r.refundFeeCents,
       seatsReleased: r.seatsReleased,
+      refundReason: r.reason ?? "customer",
     })
     .where(and(eq(orders.id, id), eq(orders.status, "paid")));
   return res.rowCount === 1;

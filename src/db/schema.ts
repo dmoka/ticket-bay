@@ -90,6 +90,8 @@ export const orders = pgTable(
     refundFeeCents: cents("refund_fee_cents"),
     seatsReleased: boolean("seats_released"),
     refundId: text("refund_id"),
+    /** why it was refunded: the customer cancelled, or the organiser cancelled the event */
+    refundReason: text("refund_reason", { enum: ["customer", "event_cancelled"] }),
   },
   (t) => [
     index("orders_event_idx").on(t.eventId),

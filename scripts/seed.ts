@@ -296,6 +296,7 @@ for (const d of drafts) {
       );
       Object.assign(row, {
         status: "refunded",
+        refundReason: "customer",
         refundedAtMs,
         refundCents: p.netCents,
         refundFeeCents: p.feeCents,
