@@ -1,5 +1,5 @@
 {
-  "id": "f57bed48-3ccd-4a7d-95f3-1664121021b9",
+  "id": "8e261a5b-a1c1-44e9-a4c8-34908bada459",
   "prevId": "b87f7ae1-44b0-40c9-8215-ce0eca0eef88",
   "version": "7",
   "dialect": "postgresql",
@@ -503,6 +503,37 @@
           "value": "\"orders\".\"refund_cents\" IS NULL OR \"orders\".\"refund_cents\" <= \"orders\".\"tickets_cents\""
         }
       },
+      "isRLSEnabled": false
+    },
+    "public.voided_charges": {
+      "name": "voided_charges",
+      "schema": "",
+      "columns": {
+        "charge_id": {
+          "name": "charge_id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true
+        },
+        "idempotency_key": {
+          "name": "idempotency_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true
+        },
+        "voided_at_ms": {
+          "name": "voided_at_ms",
+          "type": "bigint",
+          "primaryKey": false,
+          "notNull": true
+        }
+      },
+      "indexes": {},
+      "foreignKeys": {},
+      "compositePrimaryKeys": {},
+      "uniqueConstraints": {},
+      "policies": {},
+      "checkConstraints": {},
       "isRLSEnabled": false
     },
     "public.account": {

@@ -6,6 +6,10 @@ import { checkoutClaims } from "./schema";
 const dbNowMs = sql<number>`(extract(epoch from clock_timestamp()) * 1000)::bigint`;
 
 /**
+ * Claims are about behaviour, not money: a retry with the same key waits for
+ * the first attempt and then gets its order. Money safety (never book on a
+ * charge being given back) is voided-charges-repo's job.
+ *
  * Claim a checkout key for `token`. True if we now hold it: nobody had it, or
  * the holder's claim is older than `staleAfterMs` by the database's clock (a
  * checkout that crashed). One statement, so two claimers never both win.
@@ -21,20 +25,6 @@ export async function claimCheckout(db: DbLike, key: string, token: string, stal
     })
     .returning({ key: checkoutClaims.idempotencyKey });
   return won.length === 1;
-}
-
-/**
- * Inside a transaction: true if `token` still holds the claim, and hold its row
- * lock until the transaction ends — so nobody can take the claim over while
- * we book or void, and a takeover waits for us to finish.
- */
-export async function holdClaim(tx: DbLike, key: string, token: string): Promise<boolean> {
-  const rows = await tx
-    .select({ key: checkoutClaims.idempotencyKey })
-    .from(checkoutClaims)
-    .where(and(eq(checkoutClaims.idempotencyKey, key), eq(checkoutClaims.token, token)))
-    .for("update");
-  return rows.length === 1;
 }
 
 /** Release our own claim only — never one a newer attempt took over. */

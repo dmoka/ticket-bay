@@ -119,6 +119,19 @@ export const checkoutClaims = pgTable("checkout_claims", {
   claimedAtMs: instant("claimed_at_ms").notNull(),
 });
 
+/**
+ * Charges a checkout gave back because it booked nothing (sold out while the
+ * card was charged, a code used up, …). Written BEFORE the provider refund, in
+ * a transaction under the checkout key's lock; a booking takes the same lock
+ * and refuses any charge listed here — so no order is ever placed on money
+ * that is being returned, whichever attempt charged it.
+ */
+export const voidedCharges = pgTable("voided_charges", {
+  chargeId: text("charge_id").primaryKey(),
+  idempotencyKey: text("idempotency_key").notNull(),
+  voidedAtMs: instant("voided_at_ms").notNull(),
+});
+
 export type EventRow = typeof events.$inferSelect;
 export type NewEventRow = typeof events.$inferInsert;
 export type OrderRow = typeof orders.$inferSelect;

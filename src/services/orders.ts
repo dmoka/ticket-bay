@@ -7,7 +7,8 @@ import { previewCancellation } from "../domain/cancellation";
 import { checkDiscountCode, normalizeCode, quote, type CodeCheck } from "../domain/pricing";
 import type { Invoice } from "../domain/invoice";
 import type { Db } from "../db/client";
-import { claimCheckout, holdClaim, releaseCheckout } from "../db/checkout-claims-repo";
+import { claimCheckout, releaseCheckout } from "../db/checkout-claims-repo";
+import { isChargeVoided, lockCheckoutKey, recordVoid } from "../db/voided-charges-repo";
 import { getCode, getCodeForUpdate, incrementUses, toDomainCode } from "../db/codes-repo";
 import { adjustSeatsSold, getEvent, getEventForUpdate, markEventCancelled, toDomainEvent } from "../db/events-repo";
 import {
@@ -146,13 +147,13 @@ export async function placeOrder(deps: Deps, input: PlaceOrderInput): Promise<{ 
     await sleep(CLAIM_POLL_MS);
   }
   try {
-    return await placeOrderOnce(deps, input, token);
+    return await placeOrderOnce(deps, input);
   } finally {
     await releaseCheckout(deps.db, input.idempotencyKey, token);
   }
 }
 
-async function placeOrderOnce(deps: Deps, input: PlaceOrderInput, token: string): Promise<{ order: OrderRow; replayed: boolean }> {
+async function placeOrderOnce(deps: Deps, input: PlaceOrderInput): Promise<{ order: OrderRow; replayed: boolean }> {
   const { db, payments, nowMs } = deps;
   const previous = await getOrderByIdempotencyKey(db, input.idempotencyKey);
   if (previous) {
@@ -176,18 +177,22 @@ async function placeOrderOnce(deps: Deps, input: PlaceOrderInput, token: string)
     description: `${input.quantity} x ${ev.name}`,
   });
   // Same key, same amount: the provider hands back the ORIGINAL charge. If an
-  // earlier attempt with this key failed, that charge was voided — an order on
-  // it would be tickets for free. A new attempt needs a new key.
-  if (charge.refundedCents > 0) {
+  // earlier attempt with this key gave it back, an order on it would be tickets
+  // for free. Finish that refund if it never reached the provider (idempotent),
+  // then refuse: a new attempt needs a new key.
+  const earlierVoid = await isChargeVoided(db, charge.id);
+  if (earlierVoid || charge.refundedCents > 0) {
+    if (earlierVoid) await payments.refund(charge.id, charge.amountCents, `void-${input.idempotencyKey}`);
     throw new OrderError("An earlier attempt with this checkout failed and was refunded. Start a new checkout (a new idempotency key).");
   }
 
   try {
     const order = await db.transaction(async (tx) => {
-      // Only the attempt that holds the claim may book. If a newer attempt took
-      // it over (ours ran past the stale limit), stop: that attempt decides.
-      if (!(await holdClaim(tx, input.idempotencyKey, token))) {
-        throw new OrderError("This checkout took too long and was taken over by a newer attempt. Check your orders before retrying.");
+      // Money decisions for this key happen one at a time: never book on a
+      // charge another attempt has started to give back.
+      await lockCheckoutKey(tx, input.idempotencyKey);
+      if (await isChargeVoided(tx, charge.id)) {
+        throw new OrderError("An earlier attempt with this checkout failed and was refunded. Start a new checkout (a new idempotency key).");
       }
       // Re-check against the row as it is NOW: another checkout may have taken
       // the last seats while the card was being charged. The row lock makes a
@@ -231,24 +236,24 @@ async function placeOrderOnce(deps: Deps, input: PlaceOrderInput, token: string)
     });
     return { order, replayed: false };
   } catch (e) {
-    // The card was charged but this attempt booked nothing. Decide what to do
-    // with the charge holding the claim's row lock, so no other attempt with
-    // this key can book on it while we decide (and void).
-    const outcome = await db.transaction(async (tx) => {
-      const mine = await holdClaim(tx, input.idempotencyKey, token);
-      // Another attempt with this key already booked on this charge: it is theirs.
-      const winner = await getOrderByIdempotencyKey(tx, input.idempotencyKey);
-      if (winner && winner.paymentId === charge.id) return { kind: "winner" as const, winner };
-      // We lost the claim: the attempt that holds it owns this charge now.
-      if (!mine) return { kind: "not-ours" as const };
-      // Ours, and no order exists: give the money back.
-      await payments.refund(charge.id, charge.amountCents, `void-${input.idempotencyKey}`);
-      return { kind: "voided" as const };
+    // The card was charged but this attempt booked nothing. Under the key's
+    // lock: if another attempt with this key booked on the charge, it is
+    // theirs; otherwise record the void, so no attempt can book on it from
+    // now on. Then give the money back — outside any transaction, so a slow
+    // payment provider holds no database connection.
+    const winner = await db.transaction(async (tx) => {
+      await lockCheckoutKey(tx, input.idempotencyKey);
+      const booked = await getOrderByIdempotencyKey(tx, input.idempotencyKey);
+      if (booked && booked.paymentId === charge.id) return booked;
+      await recordVoid(tx, charge.id, input.idempotencyKey, nowMs);
+      return null;
     });
-    if (outcome.kind === "winner") {
-      if (outcome.winner.userId !== (input.userId ?? null)) throw new OrderError("This checkout was already used. Start a new one.");
-      return { order: outcome.winner, replayed: true };
+    if (winner) {
+      if (winner.userId !== (input.userId ?? null)) throw new OrderError("This checkout was already used. Start a new one.");
+      return { order: winner, replayed: true };
     }
+    // If this call fails, the void is recorded: the next attempt with this key finishes it.
+    await payments.refund(charge.id, charge.amountCents, `void-${input.idempotencyKey}`);
     throw e;
   }
 }
