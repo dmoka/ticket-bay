@@ -11,7 +11,30 @@ import { user } from "../../src/db/schema";
 import { createFakeStripe, type PaymentProvider } from "../../src/payments";
 import { cancelEvent, cancelOwnOrder, OrderError, placeOrder, type Deps } from "../../src/services/orders";
 import { useTestDatabase } from "./database";
-import { chargesTogether, DAY, HOUR, NOW, venue } from "./fixtures";
+import { DAY, HOUR, NOW, venue } from "./fixtures";
+
+/**
+ * Charges complete together once `n` are in flight — or after `ms`, whichever
+ * comes first. Same-key checkouts are serialized by design (advisory lock), so
+ * a pure barrier would never open; the timer lets the test measure the
+ * product instead of hanging on the harness.
+ */
+function chargesTogetherOrAfter(n: number, ms: number, inner: PaymentProvider): PaymentProvider {
+  let waiting = 0;
+  let release!: () => void;
+  const all = new Promise<void>((r) => (release = r));
+  return {
+    ...inner,
+    async charge(input) {
+      const charge = await inner.charge(input);
+      if (++waiting >= n) release();
+      await Promise.race([all, new Promise((r) => setTimeout(r, ms))]);
+      return charge;
+    },
+    refund: (...args) => inner.refund(...args),
+    getCharge: (id) => inner.getCharge(id),
+  };
+}
 
 const t = useTestDatabase();
 
@@ -74,7 +97,7 @@ describe("ADVERSARIAL idempotency: a retried booking must never be free", () => 
   });
 
   it("two concurrent submits with the same key for the same user: one order, and its charge is NOT refunded", async () => {
-    const payments = chargesTogether(2, createFakeStripe("sk_test_adv"));
+    const payments = chargesTogetherOrAfter(2, 300, createFakeStripe("sk_test_adv"));
     const uid = await newUser();
     const ev = await venue(t.db);
     const input = { eventId: ev.id, quantity: 2, email: `${uid}@example.com`, name: "Fan", userId: uid, idempotencyKey: `mcp:${uid}:dbl` };

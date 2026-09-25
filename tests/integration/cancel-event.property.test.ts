@@ -148,11 +148,13 @@ describe("cancelEvent", () => {
               expect(now.refundCents).toBe(was.ticketsCents);
               expect(now.refundFeeCents).toBe(0);
               expect(now.seatsReleased).toBe(true);
+              expect(now.refundReason).toBe("event_cancelled");
               expect(charge.refundedCents).toBe(was.ticketsCents);
               expect(now.refundId === null).toBe(was.ticketsCents === 0);
             } else {
               // 3. untouched
               expect(now).toEqual(was);
+              expect(now.refundReason).toBe("customer");
               expect(charge.refundedCents).toBe(was.refundCents);
             }
           }

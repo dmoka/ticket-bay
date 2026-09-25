@@ -55,9 +55,14 @@ describe("ADVERSARIAL round 2: a same-key retry that overlaps a failing first at
     const key = `mcp:${uid}:overlap`;
     const input = { eventId: ev.id, quantity: 2, email: `${uid}@example.com`, name: "Fan", userId: uid, idempotencyKey: key };
 
-    const bothCharged = gate();
+    // Attempt 1's charge is held open; attempt 2 is sent 300 ms later (the
+    // "retry after a timeout"). If attempt 2 could overlap, it would charge in
+    // that window; with serialization it waits — either way the business rule
+    // below must hold. When attempt 1 voids its charge, a seat frees up at that
+    // exact moment, so attempt 2 finds room and only the voided-charge guard
+    // stands between it and free tickets.
+    const firstCharged = gate();
     const release1 = gate();
-    const release2 = gate();
     let calls = 0;
     const controlled: PaymentProvider = {
       ...inner,
@@ -65,25 +70,28 @@ describe("ADVERSARIAL round 2: a same-key retry that overlaps a failing first at
         // A real provider answers with a snapshot (a JSON body), not a live
         // object that later refunds mutate — the fake's shared object hides that.
         const c = { ...(await inner.charge(i)) };
-        const n = ++calls;
-        if (n === 2) bothCharged.open();
-        await (n === 1 ? release1.p : release2.p);
+        if (++calls === 1) {
+          firstCharged.open();
+          await Promise.race([release1.p, new Promise((r) => setTimeout(r, 2_000))]);
+        }
         return c;
       },
-      refund: (...a) => inner.refund(...a),
+      async refund(id, cents, key) {
+        const r = await inner.refund(id, cents, key);
+        if (key.startsWith("void-")) await t.db.execute(sql`UPDATE events SET seats_sold = 8 WHERE id = ${ev.id}`);
+        return r;
+      },
       getCharge: (id) => inner.getCharge(id),
     };
 
     const a1 = placeOrder(deps(controlled), input);
+    await firstCharged.p;
     const a2 = placeOrder(deps(controlled), input);
-    await bothCharged.p;
+    await new Promise((r) => setTimeout(r, 300));
     // Seats are gone while attempt 1 is in its transaction.
     await t.db.execute(sql`UPDATE events SET seats_sold = total_seats WHERE id = ${ev.id}`);
     release1.open();
     await a1.catch(() => undefined);
-    // A seat frees up; attempt 2 (already past the "voided?" check) proceeds.
-    await t.db.execute(sql`UPDATE events SET seats_sold = 8 WHERE id = ${ev.id}`);
-    release2.open();
     const r2 = await a2.catch((e) => e as Error);
 
     const rows = (await t.db.execute(sql`SELECT payment_id, total_cents FROM orders`)).rows as { payment_id: string; total_cents: string }[];
@@ -105,7 +113,8 @@ describe("ADVERSARIAL round 2: a same-key retry that overlaps a failing first at
       async charge(i) {
         const c = await inner.charge(i);
         if (++n === 2) both.open();
-        await both.p;
+        // Same-key checkouts are serialized by design; release on a timer too.
+        await Promise.race([both.p, new Promise((r) => setTimeout(r, 300))]);
         return c;
       },
       refund: (...x) => inner.refund(...x),
