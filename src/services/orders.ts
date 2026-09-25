@@ -125,6 +125,20 @@ const CLAIM_POLL_MS = 100;
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+/** A refund with a few quick retries for provider blips. False if it never got through. */
+async function refundWithRetry(payments: PaymentProvider, chargeId: string, cents: number, key: string): Promise<boolean> {
+  for (const waitMs of [0, 200, 1000]) {
+    if (waitMs) await sleep(waitMs);
+    try {
+      await payments.refund(chargeId, cents, key);
+      return true;
+    } catch {
+      // try again; the idempotency key means a retry never pays twice
+    }
+  }
+  return false;
+}
+
 export async function placeOrder(deps: Deps, input: PlaceOrderInput): Promise<{ order: OrderRow; replayed: boolean }> {
   // Attempts with the same idempotency key never overlap: an agent that times
   // out and resends while its first attempt is still charging the card must
@@ -252,8 +266,13 @@ async function placeOrderOnce(deps: Deps, input: PlaceOrderInput): Promise<{ ord
       if (winner.userId !== (input.userId ?? null)) throw new OrderError("This checkout was already used. Start a new one.");
       return { order: winner, replayed: true };
     }
-    // If this call fails, the void is recorded: the next attempt with this key finishes it.
-    await payments.refund(charge.id, charge.amountCents, `void-${input.idempotencyKey}`);
+    // Give the money back, retrying a provider blip a few times. If it still
+    // fails, the void stays recorded and the next attempt with this key
+    // finishes it; either way the caller hears the real reason (e.g. sold out).
+    const refunded = await refundWithRetry(payments, charge.id, charge.amountCents, `void-${input.idempotencyKey}`);
+    if (!refunded && e instanceof OrderError) {
+      throw new OrderError(`${e.message} Your card was charged; the refund is pending — retry with the same idempotency key to complete it.`);
+    }
     throw e;
   }
 }
