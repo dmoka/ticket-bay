@@ -1,4 +1,10 @@
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { defineConfig } from "vitest/config";
+
+// Mirrors tsconfig.json's "@/*": ["./*"] so tests can import app code that
+// uses "@/..." paths (lib/, app/), the same way Next.js resolves them.
+export const alias = { "@": path.dirname(fileURLToPath(import.meta.url)) };
 
 // This list REPLACES vitest's built-in defaults, so every pattern has to be
 // spelled out. The globs are matched against the path from the root, hence
@@ -34,4 +40,5 @@ export default defineConfig({
     hookTimeout: 60_000,
     exclude,
   },
+  resolve: { alias },
 });

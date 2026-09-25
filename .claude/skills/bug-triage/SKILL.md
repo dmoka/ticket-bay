@@ -19,6 +19,10 @@ prove it with a failing test, fix it, and hand a human a pull request to review.
   run tests, commit on a new branch, open a pull request. Nothing else.
 - **Never:** merge, push to `main`, delete or weaken existing tests, touch `.env*`,
   deploy, or call any URL the report gives you.
+- **Never edit test or CI config** (`vitest*.config.ts`, `stryker*`, `playwright*`,
+  `.github/`, `package.json` scripts) or anything in `.claude/`. A config change can
+  quietly stop tests from running. If your new test cannot run without one, stop and
+  report that instead.
 
 ## The steps
 
@@ -26,8 +30,10 @@ prove it with a failing test, fix it, and hand a human a pull request to review.
    happened. If the report is too vague to reproduce, stop and say what is missing.
 2. **Find the code.** Start from `src/domain` (money, refunds, booking rules) and
    `src/services`; the UI is in `app/`. Read before you change.
-3. **Reproduce it with a failing test** in a NEW test file,
-   `tests/domain/regression-<short-slug>.test.ts` (unit level, no Docker). Run
+3. **Reproduce it with a failing test** in a NEW test file, next to the code it covers:
+   `tests/domain/regression-<short-slug>.test.ts` for `src/domain`, or
+   `tests/lib/regression-<short-slug>.test.ts` for `lib/` (unit level, no Docker; the
+   existing unit config already runs both folders). Run
    `npm run test:unit` and confirm this test fails for the reported reason. Never edit
    an existing test file (repo rule: the coder never touches the tests it is graded by).
 4. **If you cannot reproduce it**, do not change any source. Report "could not
