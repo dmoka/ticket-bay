@@ -1,0 +1,3 @@
+Starting authentication for "ticketbay"…
+Authenticated with "ticketbay". Its tools are now available in Claude Code.
+[exit 0]

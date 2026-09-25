@@ -1,0 +1,1 @@
+http://localhost:3100/api/auth/oauth2/authorize?response_type=code&client_id=https%3A%2F%2Fclaude.ai%2Foauth%2Fclaude-code-client-metadata&code_challenge=…&code_challenge_method=S256&redirect_uri=http%3A%2F%2Flocalhost%3A63962%2Fcallback&state=…&scope=tickets%3Aread+tickets%3Awrite+offline_access&prompt=consent&resource=http%3A%2F%2Flocalhost%3A3100%2Fapi%2Fmcp

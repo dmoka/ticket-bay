@@ -1,0 +1,21 @@
+pages: http://localhost:3100/sign-in -> http://localhost:3100/consent -> http://localhost:63962/callback
+
+consent page:
+Connect an app
+
+Claude Code (claude.ai) wants to use your TicketBay account, anna@ticketbay.test.
+
+It will be able to:
+See your orders tickets:read
+Book tickets and refund orders for you tickets:write
+Stay connected until you disconnect it offline_access
+Deny
+Allow
+
+Disconnect it any time under Settings → Developers.
+
+callback page:
+Connected
+Authentication successful
+
+You can close this tab and return to Claude Code.
