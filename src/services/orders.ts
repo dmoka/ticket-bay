@@ -33,6 +33,25 @@ export interface Deps {
   nowMs: number;
 }
 
+/**
+ * Run a transaction, re-running it when Postgres aborts it to break a deadlock
+ * (SQLSTATE 40P01) — e.g. an event cancellation (event → orders) racing a
+ * customer's refund (order → event). Each attempt re-reads its rows, so a
+ * retry decides on the committed state; after the last attempt the caller
+ * gets a readable refusal instead of a raw driver error.
+ */
+async function withDeadlockRetry<T>(run: () => Promise<T>, attempts = 3): Promise<T> {
+  for (let i = 1; ; i++) {
+    try {
+      return await run();
+    } catch (e) {
+      const code = (e as { code?: string; cause?: { code?: string } }).cause?.code ?? (e as { code?: string }).code;
+      if (code !== "40P01") throw e;
+      if (i >= attempts) throw new OrderError("Another change to this order or event happened at the same moment. Try again.");
+    }
+  }
+}
+
 /** A refusal the customer should read, as opposed to a bug. */
 export class OrderError extends Error {
   constructor(message: string) {
@@ -228,7 +247,7 @@ export interface CancelResult {
  */
 export async function cancelOrder(deps: Deps, orderId: number): Promise<CancelResult> {
   const { db, payments, nowMs } = deps;
-  const result = await db.transaction(async (tx) => {
+  const result = await withDeadlockRetry(() => db.transaction(async (tx) => {
     const found = await getOrderWithEvent(tx, orderId);
     if (!found) throw new OrderError("Order not found.");
     if (found.order.status === "refunded") {
@@ -254,7 +273,7 @@ export async function cancelOrder(deps: Deps, orderId: number): Promise<CancelRe
       paymentId: found.order.paymentId,
       resume: { refundCents: preview.netCents, refundFeeCents: preview.feeCents, seatsReleased: preview.releasesSeats },
     };
-  });
+  }));
 
   const { refundCents, refundFeeCents, seatsReleased } = result.resume;
   if (refundCents > 0) {
@@ -297,10 +316,10 @@ export interface CancelEventResult {
  */
 export async function cancelEvent(deps: Deps, eventId: string): Promise<CancelEventResult> {
   const { db, nowMs } = deps;
-  await db.transaction(async (tx) => {
+  await withDeadlockRetry(() => db.transaction(async (tx) => {
     // Event lock first: no checkout can add a paid order behind our back. A
     // customer refunding at the same moment locks order-then-event; Postgres
-    // detects that deadlock and aborts one side, which the caller can retry.
+    // detects that deadlock and aborts one side, and withDeadlockRetry re-runs it.
     const ev = await getEventForUpdate(tx, eventId);
     if (!ev) throw new OrderError("Event not found.");
     if (ev.cancelledAtMs !== null) {
@@ -314,7 +333,7 @@ export async function cancelEvent(deps: Deps, eventId: string): Promise<CancelEv
       if (!won) throw new OrderError(`Order ${o.id} changed while cancelling. Try again.`);
       await adjustSeatsSold(tx, eventId, -o.quantity);
     }
-  });
+  }));
   return payCancelRefunds(deps, eventId);
 }
 
