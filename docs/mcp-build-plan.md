@@ -61,3 +61,13 @@ Decisions come from the grilling on 2026-09-25 (see "Decisions") and from
 - Claude Code may speak only the 2025 protocol → SDK serves it via the stateless
   legacy path; OAuth then needs the client to support CIMD or it fails (DCR is off).
 - Port 5432 clash with other local Postgres → check before `db:up`.
+
+## Scope change (2026-09-25, evening)
+
+Course decision: agents connect with the customer's API key, so step 6 (MCP OAuth via the
+Better Auth MCP plugin + CIMD) is dropped from `app/v2-mcp`. It was already built and proven
+(Claude Code, CIMD, localhost) — that work is kept on the local branch `app/v2-mcp-oauth`
+and in `docs/mcp-e2e/oauth/`. Also: one demo customer; `cancel_event` links to the event's
+own cancel page; `search_docs` over `help/`; key scopes (Read only / Read & write).
+Caveat recorded in `docs/mcp-client-auth-2026.md`: ChatGPT cannot send API keys, and
+Claude.ai key headers are a limited beta — chat apps mostly still need OAuth.

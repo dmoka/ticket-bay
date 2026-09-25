@@ -9,22 +9,28 @@ Researched 2026-09-25 for TicketBay's MCP server (module 6). Two kinds of eviden
 
 ## The short answer
 
-| Client | API key header | OAuth "Connect" | Works against `localhost`? | TicketBay today |
+> **2026-09-25, course decision:** TicketBay uses per-user API keys only; the MCP OAuth flow
+> (Better Auth MCP plugin + CIMD) was built, proven below, and then removed from `app/v2-mcp`.
+> It is kept on the local branch `app/v2-mcp-oauth`. The table shows what that means per client.
+
+| Client | API key header | OAuth "Connect" | Works against `localhost`? | TicketBay today (keys only) |
 |---|---|---|---|---|
-| Claude Code (CLI) | yes (`--header`) | yes (`/mcp`, `claude mcp login`), CIMD or DCR | **yes — verified live** | both work: key tested, OAuth tested (CIMD) |
-| Claude.ai web / Desktop connectors | beta, limited orgs only | **yes — the main path**, CIMD or DCR | **no** — Anthropic's cloud connects | needs a public HTTPS URL (not tested, on purpose) |
-| ChatGPT (developer mode / apps) | **no** | **yes — the only way for a user's account** | **no** — needs public HTTPS or a tunnel | needs a public HTTPS URL (not tested) |
-| Cursor | yes (`headers`) | yes, **DCR or static client only** (CIMD not documented) | yes (desktop) | key works; OAuth would need DCR, which TicketBay does not enable |
-| VS Code (Copilot) | yes (`headers`) | yes, CIMD and DCR | yes | key works; OAuth should work (not tested) |
+| Claude Code (CLI) | yes (`--header`) | yes (`/mcp`, `claude mcp login`), CIMD or DCR | **yes — verified live** | **works** with a key (tested) |
+| Claude.ai web / Desktop connectors | beta, limited orgs only | **yes — the main path**, CIMD or DCR | **no** — Anthropic's cloud connects | only if the org has the "Request headers" beta, and needs a public HTTPS URL |
+| ChatGPT (developer mode / apps) | **no** | **yes — the only way for a user's account** | **no** — needs public HTTPS or a tunnel | **cannot connect as a customer** — ChatGPT sends no API keys |
+| Cursor | yes (`headers`) | yes, **DCR or static client only** (CIMD not documented) | yes (desktop) | works with a key |
+| VS Code (Copilot) | yes (`headers`) | yes, CIMD and DCR | yes | works with a key |
 
 **What that means for the course:** per-user API keys cover the developer tools (Claude Code,
-Cursor, VS Code). Chat apps (Claude.ai, ChatGPT) need OAuth and a public URL — that is why
-OAuth is the "next step" once the server is deployed. TicketBay advertises CIMD
-(`client_id_metadata_document_supported: true`, `none` auth method, S256 PKCE) and no DCR
-endpoint, following the 2026-07-28 spec. Claude Code, Claude.ai, ChatGPT and VS Code all
-support CIMD; Cursor's docs only describe DCR.
+Cursor, VS Code). Chat apps are different: ChatGPT cannot send an API key at all, and
+Claude.ai / Desktop accept a key header only as a beta for some organisations — so "a chat
+app connects with the user's API key" is not true for most users today. Chat apps connect
+with OAuth ("Connect") from their cloud, to a public HTTPS URL. The OAuth build on
+`app/v2-mcp-oauth` advertised CIMD (`client_id_metadata_document_supported: true`, `none`
+auth method, S256 PKCE) and no DCR endpoint; Claude Code, Claude.ai, ChatGPT and VS Code
+support CIMD, Cursor's docs only describe DCR.
 
-## Verified live (2026-09-25)
+## Verified live (2026-09-25, on the OAuth build — branch `app/v2-mcp-oauth`)
 
 - Claude Code's OAuth request carried `client_id=https://claude.ai/oauth/claude-code-client-metadata`
   (a CIMD URL), `code_challenge_method=S256`, `resource=http://localhost:3100/api/mcp` and the
