@@ -36,7 +36,7 @@ async function rpc(caller: Caller, body: unknown): Promise<Reply> {
     }),
     {
       authInfo: caller
-        ? { token: "", clientId: caller.via, scopes: caller.scopes ?? [], resource: new URL(`${BASE}/api/mcp`), extra: { caller } }
+        ? { token: "", clientId: "api-key", scopes: caller.scopes, extra: { caller } }
         : undefined,
     },
   );
@@ -63,7 +63,7 @@ async function newUser(role: string | null = null): Promise<NonNullable<Caller>>
   const id = `u_${randomUUID().slice(0, 12)}`;
   const email = `${id}@example.com`;
   await t.db.insert(user).values({ id, name: `User ${id}`, email, role });
-  return { userId: id, email, name: `User ${id}`, role, via: "api-key", scopes: null };
+  return { userId: id, email, name: `User ${id}`, role, scopes: ["tickets:read", "tickets:write"] };
 }
 
 async function orderCount(): Promise<number> {
@@ -92,31 +92,76 @@ describe("ADVERSARIAL anonymous callers never reach a private tool", () => {
   });
 });
 
-describe("ADVERSARIAL OAuth scopes are enforced per tool", () => {
-  it("a read-only OAuth grant cannot book (charge a card) or refund", async () => {
+// Spec (scope change): MCP OAuth is gone; API keys carry scopes. A read-only
+// key ({tickets:["read"]}) may call my_orders; book_tickets, refund_order and
+// cancel_event need tickets:write and answer with a 403-style TOOL error.
+describe("ADVERSARIAL key scopes are enforced per tool", () => {
+  const forbidden = (r: Reply) => isToolError(r) && /403|forbidden/i.test(toolText(r));
+
+  it("a read-only key cannot book (charge a card) or refund, even by replaying an existing order's key", async () => {
     clock = NOW;
     const ev = await venue(t.db);
     const u = await newUser();
-    const readOnly: Caller = { ...u, via: "oauth", scopes: ["openid", "tickets:read"] };
+    const readOnly: Caller = { ...u, scopes: ["tickets:read"] };
     const book = await call(readOnly, "book_tickets", { event_id: ev.id, quantity: 1 });
-    expect(book.status).toBe(403);
+    expect(forbidden(book), toolText(book)).toBe(true);
     expect(await orderCount()).toBe(0);
 
-    const { order } = await placeOrder({ db: t.db, payments, nowMs: NOW }, {
-      eventId: ev.id, quantity: 1, email: u.email, name: u.name, userId: u.userId, idempotencyKey: `seed-${randomUUID()}`,
-    });
-    const refund = await call(readOnly, "refund_order", { order_id: order.id });
-    expect(refund.status).toBe(403);
-    expect((await getOrder(t.db, order.id))!.status).toBe("paid");
+    // The same customer booked earlier with a read & write key...
+    const booked = await call(u, "book_tickets", { event_id: ev.id, quantity: 1, idempotency_key: "rw-1" });
+    const orderId = JSON.parse(toolText(booked)).order_id as number;
+    // ...a read-only key replaying that idempotency key gets nothing back.
+    const replay = await call(readOnly, "book_tickets", { event_id: ev.id, quantity: 1, idempotency_key: "rw-1" });
+    expect(forbidden(replay), toolText(replay)).toBe(true);
+    expect(toolText(replay)).not.toContain(String(orderId).padStart(5, "0"));
+
+    const refund = await call(readOnly, "refund_order", { order_id: orderId });
+    expect(forbidden(refund), toolText(refund)).toBe(true);
+    expect((await getOrder(t.db, orderId))!.status).toBe("paid");
+    expect(await orderCount()).toBe(1);
 
     const list = await call(readOnly, "my_orders", {});
     expect(isToolError(list)).toBeFalsy();
   });
 
-  it("an OAuth token with no scopes at all cannot read orders", async () => {
+  it("a read-only ADMIN key cannot get a cancel link", async () => {
+    clock = NOW;
+    const ev = await venue(t.db);
+    const admin = await newUser("admin");
+    const r = await call({ ...admin, scopes: ["tickets:read"] }, "cancel_event", { event_id: ev.id });
+    expect(forbidden(r), toolText(r)).toBe(true);
+    expect(toolText(r)).not.toContain("/cancel");
+  });
+
+  it.each([
+    [[], "no scopes"],
+    [["tickets:write"], "write without read"],
+    [["Tickets:Read", "TICKETS:WRITE"], "wrong case"],
+    [["tickets:read ", " tickets:write"], "padded"],
+    [["tickets:*"], "wildcard"],
+    [["tickets:read,write"], "comma-joined"],
+  ])("scopes %j (%s) never unlock a scope they do not name exactly", async (scopes, _label) => {
+    clock = NOW;
+    const ev = await venue(t.db);
     const u = await newUser();
-    const r = await call({ ...u, via: "oauth", scopes: [] }, "my_orders", {});
-    expect(r.status).toBe(403);
+    const c: Caller = { ...u, scopes: scopes as string[] };
+    const book = await call(c, "book_tickets", { event_id: ev.id, quantity: 1 });
+    if (!(scopes as string[]).includes("tickets:write")) expect(isToolError(book), toolText(book)).toBeTruthy();
+    const list = await call(c, "my_orders", {});
+    if (!(scopes as string[]).includes("tickets:read")) expect(isToolError(list), toolText(list)).toBeTruthy();
+    if (!(scopes as string[]).includes("tickets:write")) expect(await orderCount()).toBe(0);
+  });
+
+  it("a JSON-RPC batch mixing a read and a write call with a read-only key writes nothing", async () => {
+    clock = NOW;
+    const ev = await venue(t.db);
+    const u = await newUser();
+    const r = await rpc({ ...u, scopes: ["tickets:read"] }, [
+      { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: "my_orders", arguments: {} } },
+      { jsonrpc: "2.0", id: 2, method: "tools/call", params: { name: "book_tickets", arguments: { event_id: ev.id, quantity: 1 } } },
+    ]);
+    expect(r.status).toBeLessThan(500);
+    expect(await orderCount()).toBe(0);
   });
 });
 
@@ -189,7 +234,9 @@ describe("ADVERSARIAL cancel_event is admin-only and only for events that can be
     expect(out.cancelled).toBe(false);
     const url = new URL(out.confirm_url);
     expect(url.origin).toBe(BASE);
-    expect(url.searchParams.get("cancel")).toBe(ev.id);
+    // Spec (scope change): the link is the event's own cancel page.
+    expect(url.pathname).toBe(`/admin/events/${encodeURIComponent(ev.id)}/cancel`);
+    expect(url.searchParams.get("via")).toBe("mcp");
     const row = await t.db.execute(sql`SELECT cancelled_at_ms FROM events WHERE id = ${ev.id}`);
     expect((row.rows[0] as { cancelled_at_ms: unknown }).cancelled_at_ms).toBeNull();
   });
@@ -202,5 +249,28 @@ describe("ADVERSARIAL cancel_event is admin-only and only for events that can be
     clock = NOW;
     expect(isToolError(r)).toBeTruthy();
     expect(toolText(r)).not.toContain("confirm_url");
+  });
+});
+
+describe("ADVERSARIAL search_docs over MCP (public, anonymous)", () => {
+  it("works anonymously and only quotes help/*.md", async () => {
+    const r = await call(null, "search_docs", { query: "../../.env secret refund" });
+    expect(isToolError(r)).toBeFalsy();
+    for (const hit of JSON.parse(toolText(r)).results) expect(hit.source).toMatch(/^help\/[a-z0-9-]+\.md$/);
+  });
+
+  it.each([
+    [{ query: "a" }, "1-char query"],
+    [{ query: "x".repeat(201) }, "201-char query"],
+    [{ query: "refund", limit: 0 }, "limit 0"],
+    [{ query: "refund", limit: -1 }, "limit -1"],
+    [{ query: "refund", limit: 6 }, "limit 6"],
+    [{ query: "refund", limit: 2.5 }, "fractional limit"],
+    [{ query: ["refund"] }, "array query"],
+    [{ query: { $ne: "" } }, "object query"],
+  ])("rejects %j (%s) cleanly", async (args) => {
+    const r = await call(null, "search_docs", args as Record<string, unknown>);
+    expect(isToolError(r)).toBeTruthy();
+    expect(r.status).toBeLessThan(500);
   });
 });

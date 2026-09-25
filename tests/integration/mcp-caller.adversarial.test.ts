@@ -8,7 +8,7 @@ import { describe, it, expect, beforeAll } from "vitest";
 import { eq } from "drizzle-orm";
 import { createAuth, type Auth } from "../../src/auth/auth";
 import { resolveCaller } from "../../src/mcp/caller";
-import { apikey, oauthClient, oauthConsent, user } from "../../src/db/schema";
+import { apikey, user } from "../../src/db/schema";
 import { useTestDatabase } from "./database";
 
 const t = useTestDatabase();
@@ -25,7 +25,7 @@ function req(authorization?: string): Request {
   if (authorization !== undefined) headers.set("authorization", authorization);
   return new Request(`${BASE}/api/mcp`, { method: "POST", headers, body: "{}" });
 }
-const resolve = (authorization?: string) => resolveCaller({ auth, db: t.db, baseURL: BASE }, req(authorization));
+const resolve = (authorization?: string) => resolveCaller({ auth, db: t.db }, req(authorization));
 
 async function signUp(): Promise<{ id: string; headers: Headers }> {
   const email = `${randomUUID().slice(0, 10)}@example.com`;
@@ -146,20 +146,123 @@ describe("ADVERSARIAL Settings → Developers: one user cannot touch another's k
     const ids = JSON.stringify(list);
     expect(ids).not.toContain(victim.id);
   });
+});
 
-  it("cannot disconnect someone else's connected app", async () => {
+// ---- Scope change: key scopes (read vs read & write) --------------------------
+
+/** A browser-style HTTP call to Better Auth's own endpoints (NOT a server call). */
+async function http(path: string, body: unknown, headers: Record<string, string>) {
+  const res = await auth.handler(
+    new Request(`${BASE}/api/auth${path}`, {
+      method: "POST",
+      headers: { "content-type": "application/json", origin: BASE, ...headers },
+      body: JSON.stringify(body),
+    }),
+  );
+  let json: any = null;
+  try {
+    json = await res.json();
+  } catch {
+    /* empty */
+  }
+  return { status: res.status, json };
+}
+
+async function readOnlyKey(u: { id: string }) {
+  const k = await auth.api.createApiKey({ body: { name: "ro", userId: u.id, permissions: { tickets: ["read"] } } });
+  return { id: k.id, key: k.key };
+}
+
+describe("ADVERSARIAL key scopes: a key's scope can only come from the server", () => {
+  it("control: the browser-style harness is authenticated (plain create and rename succeed)", async () => {
+    const a = await signUp();
+    const c = await http("/api-key/create", { name: "plain" }, { cookie: a.headers.get("cookie")! });
+    expect(c.status, JSON.stringify(c.json)).toBe(200);
+    const u = await http("/api-key/update", { keyId: c.json.id, name: "renamed" }, { cookie: a.headers.get("cookie")! });
+    expect(u.status, JSON.stringify(u.json)).toBe(200);
+  });
+
+  it("a read-only key resolves to exactly tickets:read, a default key to read & write", async () => {
+    const a = await signUp();
+    const ro = await readOnlyKey(a);
+    const r1 = await resolve(`Bearer ${ro.key}`);
+    expect(r1.ok && [...r1.caller!.scopes].sort()).toEqual(["tickets:read"]);
+    const rw = await keyFor(a);
+    const r2 = await resolve(`Bearer ${rw.key}`);
+    expect(r2.ok && [...r2.caller!.scopes].sort()).toEqual(["tickets:read", "tickets:write"]);
+  });
+
+  it("a signed-in browser cannot mint a key with chosen permissions through /api-key/create", async () => {
+    const a = await signUp();
+    const r = await http("/api-key/create", { name: "evil", permissions: { tickets: ["read", "write", "admin"] } }, { cookie: a.headers.get("cookie")! });
+    expect(r.status, JSON.stringify(r.json)).toBeGreaterThanOrEqual(400);
+  });
+
+  it("a signed-in browser cannot widen a read-only key through /api-key/update", async () => {
+    const a = await signUp();
+    const ro = await readOnlyKey(a);
+    await http("/api-key/update", { keyId: ro.id, permissions: { tickets: ["read", "write"] } }, { cookie: a.headers.get("cookie")! });
+    const r = await resolve(`Bearer ${ro.key}`);
+    expect(r.ok && r.caller!.scopes).toEqual(["tickets:read"]);
+  });
+
+  it("a signed-in browser cannot create a key for ANOTHER user", async () => {
     const a = await signUp();
     const b = await signUp();
-    const clientId = `client-${randomUUID().slice(0, 8)}`;
-    await t.db.insert(oauthClient).values({
-      id: randomUUID(), clientId, redirectUris: ["http://localhost/cb"], name: "Some app", createdAt: new Date(), updatedAt: new Date(),
-    } as typeof oauthClient.$inferInsert);
-    const consentId = randomUUID();
-    await t.db.insert(oauthConsent).values({
-      id: consentId, clientId, userId: a.id, scopes: ["tickets:read"], createdAt: new Date(), updatedAt: new Date(),
-    });
-    await auth.api.deleteOAuthConsent({ body: { id: consentId }, headers: b.headers }).catch(() => undefined);
-    const still = await t.db.select().from(oauthConsent).where(eq(oauthConsent.id, consentId));
-    expect(still).toHaveLength(1);
+    const r = await http("/api-key/create", { name: "for-b", userId: b.id }, { cookie: a.headers.get("cookie")! });
+    if (r.status < 400 && r.json?.key) {
+      const who = await resolve(`Bearer ${r.json.key}`);
+      expect(who.ok && who.caller!.userId).toBe(a.id);
+    }
+  });
+
+  it.each([
+    ["x-api-key", (k: string) => ({ "x-api-key": k })],
+    ["Authorization Bearer", (k: string) => ({ authorization: `Bearer ${k}` })],
+  ])("a read-only KEY (%s, no session) cannot mint or widen keys through Better Auth's endpoints", async (_l, hdr) => {
+    const a = await signUp();
+    const ro = await readOnlyKey(a);
+    const create = await http("/api-key/create", { name: "escalate" }, hdr(ro.key));
+    expect(create.status, JSON.stringify(create.json)).toBeGreaterThanOrEqual(400);
+    await http("/api-key/update", { keyId: ro.id, permissions: { tickets: ["read", "write"] } }, hdr(ro.key));
+    const r = await resolve(`Bearer ${ro.key}`);
+    expect(r.ok && r.caller!.scopes).toEqual(["tickets:read"]);
+    const list = await http("/api-key/list", {}, hdr(ro.key));
+    expect(list.status === 405 || list.status >= 400 || !list.json?.length).toBeTruthy();
+  });
+
+  it("a key with no stored permissions (made before scopes existed) follows the spec default: read & write", async () => {
+    // Spec: "default when unspecified: read & write". Keys created before the
+    // scope change have permissions = NULL in the apikey table.
+    const a = await signUp();
+    const k = await keyFor(a);
+    await t.db.update(apikey).set({ permissions: null }).where(eq(apikey.id, k.id));
+    const r = await resolve(`Bearer ${k.key}`);
+    expect(r.ok && [...r.caller!.scopes].sort()).toEqual(["tickets:read", "tickets:write"]);
+  });
+
+  it("rotating a key with no stored permissions (as rotateKeyAction does) gives a working read & write key", async () => {
+    const a = await signUp();
+    const k = await keyFor(a);
+    await t.db.update(apikey).set({ permissions: null }).where(eq(apikey.id, k.id));
+    const old = await auth.api.getApiKey({ query: { id: k.id }, headers: a.headers });
+    const { scopesOf } = await import("../../src/auth/auth");
+    const tickets = scopesOf(old.permissions).filter((s) => s.startsWith("tickets:")).map((s) => s.slice("tickets:".length));
+    const created = await auth.api.createApiKey({ body: { name: old.name ?? "k", userId: old.referenceId, permissions: { tickets } } });
+    const r = await resolve(`Bearer ${created.key}`);
+    expect(r.ok && [...r.caller!.scopes].sort()).toEqual(["tickets:read", "tickets:write"]);
+  });
+
+  it("rotation as rotateKeyAction does it keeps a read-only key read-only", async () => {
+    const a = await signUp();
+    const ro = await readOnlyKey(a);
+    const old = await auth.api.getApiKey({ query: { id: ro.id }, headers: a.headers });
+    const { scopesOf } = await import("../../src/auth/auth");
+    const tickets = scopesOf(old.permissions).filter((s) => s.startsWith("tickets:")).map((s) => s.slice("tickets:".length));
+    const created = await auth.api.createApiKey({ body: { name: old.name ?? "k", userId: old.referenceId, permissions: { tickets } } });
+    await auth.api.deleteApiKey({ body: { keyId: ro.id }, headers: a.headers });
+    const r = await resolve(`Bearer ${created.key}`);
+    expect(r.ok && r.caller!.scopes).toEqual(["tickets:read"]);
+    expect(r.ok && r.caller!.userId).toBe(a.id);
   });
 });

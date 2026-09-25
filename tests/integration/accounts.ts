@@ -3,7 +3,7 @@
 // sessions — nothing about auth or the database is stubbed.
 import { beforeEach, expect } from "vitest";
 import { eq, sql } from "drizzle-orm";
-import { createAuth, type Auth } from "../../src/auth/auth";
+import { createAuth, KEY_SCOPES, type Auth, type KeyScope } from "../../src/auth/auth";
 import type { Db } from "../../src/db/client";
 import { apikey, user } from "../../src/db/schema";
 import type { TestDatabase } from "./database";
@@ -21,7 +21,7 @@ export function makeAuth(db: Db): Auth {
  */
 export function useCleanAccounts(t: TestDatabase) {
   beforeEach(async () => {
-    await t.db.execute(sql`TRUNCATE "user", "session", "account", "verification", "apikey", "oauth_consent" RESTART IDENTITY CASCADE`);
+    await t.db.execute(sql`TRUNCATE "user", "session", "account", "verification", "apikey" RESTART IDENTITY CASCADE`);
   });
 }
 
@@ -46,6 +46,16 @@ export async function customer(auth: Auth, name = `Customer ${++n}`): Promise<Cu
   const key = await auth.api.createApiKey({ body: { name: "agent" }, headers: new Headers({ cookie }) });
   expect(key.key.startsWith("tb_")).toBe(true);
   return { id: su.response.user.id, email, name, cookie, key: key.key, keyId: key.id };
+}
+
+/**
+ * A key with an explicit scope, made the way Settings → Developers makes it:
+ * Better Auth's server-only path (no session headers, the user id in the body).
+ */
+export async function scopedKey(auth: Auth, userId: string, scope: KeyScope, name = "agent"): Promise<{ key: string; keyId: string }> {
+  const created = await auth.api.createApiKey({ body: { name, userId, permissions: { tickets: [...KEY_SCOPES[scope].tickets] } } });
+  expect(created.key.startsWith("tb_")).toBe(true);
+  return { key: created.key, keyId: created.id };
 }
 
 /** Revoke a key the way the Settings page does: the owner deletes it. */

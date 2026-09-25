@@ -81,13 +81,13 @@ describe("an API key resolves to exactly its owner", () => {
   it("each key maps to the user who created it, with that user's identity", async () => {
     const anna = await customer(auth, "Anna");
     const bela = await customer(auth, "Bela");
-    const deps = { auth, db: t.db, baseURL: BASE_URL };
+    const deps = { auth, db: t.db };
 
     const a = await resolveCaller(deps, new Request(`${BASE_URL}/api/mcp`, { headers: bearer(anna.key) }));
     const b = await resolveCaller(deps, new Request(`${BASE_URL}/api/mcp`, { headers: bearer(bela.key) }));
 
-    expect(a).toEqual({ ok: true, caller: { userId: anna.id, email: anna.email, name: "Anna", role: "user", via: "api-key", scopes: null } });
-    expect(b).toEqual({ ok: true, caller: { userId: bela.id, email: bela.email, name: "Bela", role: "user", via: "api-key", scopes: null } });
+    expect(a).toEqual({ ok: true, caller: { userId: anna.id, email: anna.email, name: "Anna", role: "user", scopes: ["tickets:read", "tickets:write"] } });
+    expect(b).toEqual({ ok: true, caller: { userId: bela.id, email: bela.email, name: "Bela", role: "user", scopes: ["tickets:read", "tickets:write"] } });
   });
 
   it("my_orders over the route shows the key owner's account", async () => {
@@ -98,14 +98,14 @@ describe("an API key resolves to exactly its owner", () => {
   });
 
   it("no Authorization header is anonymous (caller null), not an error", async () => {
-    const r = await resolveCaller({ auth, db: t.db, baseURL: BASE_URL }, new Request(`${BASE_URL}/api/mcp`));
+    const r = await resolveCaller({ auth, db: t.db }, new Request(`${BASE_URL}/api/mcp`));
     expect(r).toEqual({ ok: true, caller: null });
   });
 });
 
 describe("a bad credential is refused — never downgraded to anonymous", () => {
   const refusedEverywhere = async (headers: Record<string, string>, expectMsg: RegExp) => {
-    const deps = { auth, db: t.db, baseURL: BASE_URL };
+    const deps = { auth, db: t.db };
     const resolved = await resolveCaller(deps, new Request(`${BASE_URL}/api/mcp`, { headers }));
     expect(resolved.ok).toBe(false);
 
@@ -116,8 +116,7 @@ describe("a bad credential is refused — never downgraded to anonymous", () => 
     ] as const) {
       const reply = await call(tool, args, headers);
       expect(reply.status, `${tool} ${JSON.stringify(reply.body)}`).toBe(401);
-      expect(reply.wwwAuthenticate).toContain('error="invalid_token"');
-      expect(reply.wwwAuthenticate).toContain("resource_metadata=");
+      expect(reply.wwwAuthenticate).toMatch(/^Bearer /);
       expect((reply.body as { error: { code: number; message: string } }).error.code).toBe(-32001);
       expect((reply.body as { error: { message: string } }).error.message).toMatch(expectMsg);
     }
@@ -154,8 +153,15 @@ describe("a bad credential is refused — never downgraded to anonymous", () => 
     await refusedEverywhere(bearer(anna.key), /not active|does not work/);
   });
 
-  it("a non-tb_ bearer token that is not a valid OAuth JWT", async () => {
-    await refusedEverywhere(bearer("not.a.jwt"), /invalid or expired/);
+  it("any bearer that is not a tb_ key (OAuth is not supported): garbage, a JWT-shaped token, a DPoP token", async () => {
+    await refusedEverywhere(bearer("not.a.jwt"), /Bearer tb_/);
+    const jwtLike = [{ alg: "EdDSA", typ: "at+jwt" }, { sub: "someone", scope: "tickets:read tickets:write" }]
+      .map((p) => Buffer.from(JSON.stringify(p)).toString("base64url"))
+      .concat("sig")
+      .join(".");
+    await refusedEverywhere(bearer(jwtLike), /Bearer tb_/);
+    await refusedEverywhere({ authorization: "DPoP tb_whatever" }, /Bearer tb_/);
+    await refusedEverywhere(bearer("TB_uppercase_prefix"), /Bearer tb_/);
   });
 
   it("a malformed Authorization header", async () => {
@@ -201,8 +207,7 @@ describe("anonymous callers", () => {
   ])("get a 401 with the readable message from %s", async (tool, args) => {
     const reply = await call(tool, args);
     expect(reply.status).toBe(401);
-    expect(reply.wwwAuthenticate).toContain("resource_metadata=");
-    expect(reply.wwwAuthenticate).not.toContain("invalid_token");
+    expect(reply.wwwAuthenticate).toMatch(/^Bearer /);
     expect(reply.body).toMatchObject({ jsonrpc: "2.0", error: { code: -32001, message: UNAUTHENTICATED_MESSAGE } });
   });
 
@@ -334,9 +339,7 @@ describe("cancel_event (admin) only prepares the cancellation", () => {
     const r = toolResult(await call("cancel_event", { event_id: ev.id }, bearer(boss.key)));
     expect(r.isError, r.text).toBe(false);
     expect(r.data).toMatchObject({ cancelled: false, impact_if_confirmed: { paid_orders_refunded: 1, tickets_refunded: 2 } });
-    const url = new URL(r.data.confirm_url);
-    expect(url.pathname).toBe("/admin/events");
-    expect(url.searchParams.get("cancel")).toBe(ev.id);
+    expect(r.data.confirm_url).toBe(`http://localhost:3000/admin/events/${ev.id}/cancel?via=mcp`);
 
     expect((await getEvent(t.db, ev.id))!.cancelledAtMs).toBeNull();
     expect((await getOrder(t.db, booked.order_id))!.status).toBe("paid");

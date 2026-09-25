@@ -317,7 +317,7 @@ describe("quote_price", () => {
         .values({ id: "u-quote", name: "Quote Fan", email: "quote@example.com" })
         .onConflictDoNothing()
         .returning();
-      const caller: Caller = { userId: "u-quote", email: "quote@example.com", name: "Quote Fan", role: null, via: "api-key", scopes: null };
+      const caller: Caller = { userId: "u-quote", email: "quote@example.com", name: "Quote Fan", role: null, scopes: ["tickets:read", "tickets:write"] };
       void u;
       await fc.assert(
         fc.asyncProperty(quoteInput, async (q) => {
@@ -336,8 +336,8 @@ describe("quote_price", () => {
 });
 
 describe("my_orders refund_breakdown and refund_order", () => {
-  const CALLER: Caller = { userId: "u-prop", email: "prop@example.com", name: "Prop Fan", role: null, via: "api-key", scopes: null };
-  const OTHER: Caller = { userId: "u-other", email: "other@example.com", name: "Other Fan", role: null, via: "api-key", scopes: null };
+  const CALLER: Caller = { userId: "u-prop", email: "prop@example.com", name: "Prop Fan", role: null, scopes: ["tickets:read", "tickets:write"] };
+  const OTHER: Caller = { userId: "u-other", email: "other@example.com", name: "Other Fan", role: null, scopes: ["tickets:read", "tickets:write"] };
 
   async function ensureUsers() {
     for (const c of [CALLER, OTHER]) {

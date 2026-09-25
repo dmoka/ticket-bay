@@ -1,5 +1,5 @@
 // Money path 4: the organiser calls an event off. The cancel_event MCP tool
-// only PREPARES this — it hands the admin a deep link, /admin/events?cancel=<id>,
+// only PREPARES this — it hands the admin a deep link, /admin/events/<id>/cancel,
 // and a human confirms in the UI. Every paid order must then show a FULL
 // refund of the ticket price (no refund fee, no window) to its customer.
 import { test, expect, type Browser, type Page } from "@playwright/test";
@@ -18,47 +18,54 @@ async function customerBooks(browser: Browser, user: E2EUser, qty: string): Prom
 
 test("an admin cancels an event from the deep link, and every customer sees a full ticket refund", async ({ browser, page, context }) => {
   const ev = E2E_EVENTS.adminCancel;
-  const deepLink = `/admin/events?cancel=${ev}`;
+  // What the cancel_event MCP tool hands the admin: the event's cancel page.
+  const deepLink = `/admin/events/${ev}/cancel?via=mcp`;
 
   // Two customers on two accounts: 2 tickets (€103.00 paid) and 1 ticket (€51.50 paid).
   const ann = await customerBooks(browser, E2E_USERS.fanA, "2");
   const bob = await customerBooks(browser, E2E_USERS.fanB, "1");
 
-  // A customer following the link gets no dialog and no power.
+  // A customer following the link gets no cancel form and no power.
   await ann.page.goto(deepLink);
   await expect(ann.page.getByRole("heading", { name: "Admins only" })).toBeVisible();
-  await expect(ann.page.getByRole("dialog")).toHaveCount(0);
+  await expect(ann.page.getByRole("button", { name: "Cancel event and refund everyone" })).toHaveCount(0);
 
   // The admin opens the deep link signed out: sign-in must bring them back to
-  // the SAME link, ?cancel= included, or the prepared cancellation is lost.
+  // the SAME link, ?via=mcp included, or the agent's hand-off is lost.
   await setClock(context, BOOKING_AT_MS);
   await page.goto(deepLink);
   await expect(page).toHaveURL(`/sign-in?next=${encodeURIComponent(deepLink)}`);
   await submitSignIn(page, E2E_USERS.admin);
   await page.waitForURL(deepLink);
 
-  const dialog = page.getByRole("dialog", { name: `Cancel RockFest admin-cancel?` });
-  await expect(dialog).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Cancel RockFest admin-cancel?" })).toBeVisible();
+  await expect(page.getByText("An AI agent prepared this. Nothing has changed yet — you decide.")).toBeVisible();
   // The impact before anything changes: 2 orders, 3 tickets, €150.00 of tickets back.
-  await expect(dialog).toContainText("2 paid orders, 3 tickets, are refunded");
-  await expect(dialog).toContainText("€150.00 goes back to customers");
+  const main = page.getByRole("main");
+  await expect(main).toContainText("2 paid orders, 3 tickets, are refunded");
+  await expect(main).toContainText("€150.00 goes back to customers");
 
   // A wrong confirmation changes nothing.
-  await dialog.getByLabel(`Type ${ev} to confirm`).fill("e2e-wrong");
-  await dialog.getByRole("button", { name: "Cancel event and refund everyone" }).click();
-  await expect(dialog.getByRole("alert")).toHaveText("Type the event id exactly to confirm.");
+  await page.getByLabel(`Type ${ev} to confirm`).fill("e2e-wrong");
+  await page.getByRole("button", { name: "Cancel event and refund everyone" }).click();
+  await expect(page.getByRole("alert").filter({ hasText: "Type the event id" })).toHaveText("Type the event id exactly to confirm.");
+  await expect(page).toHaveURL(deepLink);
 
-  await dialog.getByLabel(`Type ${ev} to confirm`).fill(ev);
-  await dialog.getByRole("button", { name: "Cancel event and refund everyone" }).click();
-  // The page re-renders with the event cancelled: the dialog goes away and the
-  // admin gets the result as a banner on the events page.
+  await page.getByLabel(`Type ${ev} to confirm`).fill(ev);
+  await page.getByRole("button", { name: "Cancel event and refund everyone" }).click();
+  // The admin lands back on the events list with the result as a banner.
+  await page.waitForURL(`/admin/events?cancelled=${ev}`);
   await expect(page.getByRole("status").filter({ hasText: "RockFest admin-cancel is cancelled." })).toHaveText(
     "RockFest admin-cancel is cancelled. Sales are closed and 2 orders are refunded, €150.00 in total.",
   );
-  await expect(dialog).toBeHidden();
   // Every refund reached the payment provider: nothing is left to retry.
   await expect(page.getByRole("button", { name: "Retry refunds" })).toHaveCount(0);
   await expect(page.getByRole("row").filter({ hasText: "RockFest admin-cancel" })).toContainText("Cancelled");
+
+  // The deep link cannot cancel (and refund) twice.
+  await page.goto(deepLink);
+  await expect(page.getByRole("status")).toContainText("This event is already cancelled.");
+  await expect(page.getByRole("button", { name: "Cancel event and refund everyone" })).toHaveCount(0);
 
   // Each customer: "My orders" says Refunded, and the order page shows the
   // whole ticket price back — €100.00 and €50.00, no 2% fee taken.
