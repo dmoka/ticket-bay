@@ -14,7 +14,36 @@ Needs Node 22 and a running Docker.
 npm install && npm run db:up && npm run db:migrate && npm run db:seed && npm run dev
 ```
 
-Then open http://localhost:3000 (storefront) and http://localhost:3000/admin (dashboard). The seed creates 8 events, ~300 orders over the last 60 days and a demo customer: look up `alex.morgan@example.com` under **My orders**.
+Then open http://localhost:3000 (storefront) and http://localhost:3000/admin (dashboard). The seed creates 8 events, ~300 orders over the last 60 days and three accounts, all with the password `ticketbay-demo`:
+
+| Account | Role | What it has |
+|---|---|---|
+| `anna@ticketbay.test` | customer | a history of orders under **My orders** |
+| `ben@ticketbay.test` | customer | one order — his agent never sees Anna's |
+| `admin@ticketbay.test` | admin | the `/admin` dashboard |
+
+Accounts, sessions and API keys are [Better Auth](https://www.better-auth.com) on the same Postgres (`src/auth/auth.ts`). Serving on another port? Set `BETTER_AUTH_URL` to match, e.g. `PORT=3100 BETTER_AUTH_URL=http://localhost:3100 npm run dev`.
+
+## The MCP server
+
+TicketBay is also an MCP server, so a customer's AI agent can browse, book and refund for them. The tools are defined once in `src/mcp/tools.ts` and served two ways:
+
+| | Local | Remote |
+|---|---|---|
+| Entry | `mcp/server.ts` (stdio) | `app/api/mcp/route.ts` (Streamable HTTP, `/api/mcp`) |
+| Tools | public: `list_events`, `get_event`, `quote_price` | public + private: `book_tickets`, `my_orders`, `refund_order`, `cancel_event` (admin, returns a link only) |
+| Auth | none — the client starts it on your machine | `Authorization: Bearer tb_…` (a key from **Settings → Developers**) or OAuth ("Connect") |
+
+```bash
+# local, public tools
+claude mcp add ticketbay-local -- npx tsx "$PWD/mcp/server.ts"
+# remote, as a customer (create the key under Settings → Developers)
+claude mcp add --transport http ticketbay http://localhost:3000/api/mcp --header "Authorization: Bearer tb_…"
+# remote with OAuth instead of a key
+claude mcp add --transport http ticketbay http://localhost:3000/api/mcp && claude mcp login ticketbay
+```
+
+Without a key the public tools still work; a private tool answers `401` with the challenge an OAuth client uses to start "Connect". Which clients need OAuth and which accept a key header: [`docs/mcp-client-auth-2026.md`](docs/mcp-client-auth-2026.md). The end-to-end proof: [`docs/mcp-e2e-2026.md`](docs/mcp-e2e-2026.md).
 
 `npm run db:up` starts Postgres 17 from `docker-compose.yml` (port 5432, named volume `ticketbay-pg`) and waits until it is healthy. Its local-only credentials and `DATABASE_URL` live in `.env.example`; the scripts read it when there is no `.env`. Copy it to `.env` to change anything. `npm run db:down` stops the database; `docker compose down -v` also deletes its data.
 
@@ -23,7 +52,7 @@ Then open http://localhost:3000 (storefront) and http://localhost:3000/admin (da
 | `npm test` | Vitest: domain unit + property tests, payments, and the integration tests against a real Postgres (Testcontainers starts one container for the run) |
 | `npm run test:unit` | The same minus the integration tests — no Docker needed |
 | `npm run test:integration` | Only the Postgres integration tests |
-| `npm run test:ui` | Playwright: the three critical money paths against a production build and its own Postgres container |
+| `npm run test:ui` | Playwright: the critical money paths against a production build and its own Postgres container |
 | `npm run test:mutation` | Stryker on `src/domain` (unit lane) |
 | `npm run typecheck` / `npm run build` | `tsc --noEmit` / production build |
 
