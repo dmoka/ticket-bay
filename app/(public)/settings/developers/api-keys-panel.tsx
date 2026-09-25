@@ -6,13 +6,15 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { dateTime } from "@/lib/format";
+import type { KeyScope } from "@/src/auth/auth";
 import { createKeyAction, revokeKeyAction, rotateKeyAction, type NewKey } from "./actions";
 
-export type KeyRow = { id: string; name: string; start: string; createdAt: number; lastUsedAt: number | null };
+export type KeyRow = { id: string; name: string; start: string; createdAt: number; lastUsedAt: number | null; canWrite: boolean };
 
 // The secret is shown exactly once, right after it is created or rotated.
 export function ApiKeysPanel({ keys }: { keys: KeyRow[] }) {
   const [name, setName] = useState("");
+  const [scope, setScope] = useState<KeyScope>("read");
   const [fresh, setFresh] = useState<{ name: string; key: string } | null>(null);
   const [copied, setCopied] = useState(false);
   const [confirm, setConfirm] = useState<{ id: string; kind: "revoke" | "rotate" } | null>(null);
@@ -29,7 +31,7 @@ export function ApiKeysPanel({ keys }: { keys: KeyRow[] }) {
 
   const create = () =>
     start(async () => {
-      const res = await createKeyAction(name);
+      const res = await createKeyAction(name, scope);
       showNew(res);
       if (res.ok) setName("");
     });
@@ -85,6 +87,15 @@ export function ApiKeysPanel({ keys }: { keys: KeyRow[] }) {
         }}
       >
         <Input aria-label="Key name" placeholder="Key name, e.g. “Claude Code”" value={name} maxLength={32} onChange={(e) => setName(e.target.value)} />
+        <select
+          aria-label="Key scope"
+          value={scope}
+          onChange={(e) => setScope(e.target.value as KeyScope)}
+          className="h-9 rounded-md border border-input bg-background px-2 text-[13px]"
+        >
+          <option value="read">Read only</option>
+          <option value="read-write">Read &amp; write</option>
+        </select>
         <Button type="submit" disabled={pending || !name.trim()}>
           <Plus className="h-3.5 w-3.5" />
           Create key
@@ -97,7 +108,12 @@ export function ApiKeysPanel({ keys }: { keys: KeyRow[] }) {
           <div key={k.id} className="flex items-center gap-3 px-4 py-3" data-testid="key-row">
             <KeyRound className="h-4 w-4 shrink-0 text-muted-foreground" />
             <div className="min-w-0 flex-1">
-              <div className="truncate font-medium">{k.name}</div>
+              <div className="flex items-center gap-2">
+                <span className="truncate font-medium">{k.name}</span>
+                <span className="rounded border border-border bg-muted/50 px-1.5 text-[11px] leading-5 text-muted-foreground" data-testid="key-scope">
+                  {k.canWrite ? "Read & write" : "Read only"}
+                </span>
+              </div>
               <div className="text-[12px] text-muted-foreground">
                 <span className="font-mono">{k.start}…</span> · created <span className="font-mono tabular-nums">{dateTime(k.createdAt)}</span> ·{" "}
                 {k.lastUsedAt ? (

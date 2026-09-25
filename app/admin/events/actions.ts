@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { redirect } from "next/navigation";
 import { getDb } from "@/src/db/client";
 import { getPayments, PaymentError } from "@/src/payments";
 import { cancelEvent, OrderError } from "@/src/services/orders";
@@ -17,12 +18,12 @@ export async function cancelEventAction(_prev: CancelEventState, form: FormData)
   if (String(form.get("confirm") ?? "").trim() !== eventId) return { error: "Type the event id exactly to confirm." };
   try {
     await cancelEvent({ db: getDb(), payments: getPayments(), nowMs: await now() }, eventId);
-    revalidatePath("/admin/events");
-    return {};
   } catch (e) {
     if (e instanceof OrderError || e instanceof PaymentError) return { error: e.message };
     throw e;
   }
+  revalidatePath("/admin/events");
+  redirect(`/admin/events?cancelled=${encodeURIComponent(eventId)}`);
 }
 
 /** Retry the payouts a cancellation still owes (a provider failure mid-way). */

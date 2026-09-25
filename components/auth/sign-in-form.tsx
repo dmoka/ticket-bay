@@ -6,7 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { authClient, redirectTarget } from "@/lib/auth-client";
+import { authClient } from "@/lib/auth-client";
 import { FormError } from "./auth-card";
 
 export function SignInForm({ next, mode }: { next: string; mode: "sign-in" | "sign-up" }) {
@@ -29,17 +29,12 @@ export function SignInForm({ next, mode }: { next: string; mode: "sign-in" | "si
       setPending(false);
       return;
     }
-    const oauth = redirectTarget(res.data);
-    if (oauth) {
-      window.location.href = oauth;
-      return;
-    }
     router.push(next);
     router.refresh();
   }
 
   const other = mode === "sign-in" ? "/sign-up" : "/sign-in";
-  // Carry the query (next, or a signed OAuth request) over to the other form.
+  // Carry ?next= over to the other form.
   const query = search ? `?${search}` : "";
   return (
     <form action={submit} className="space-y-4">

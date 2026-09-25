@@ -1,15 +1,12 @@
-// Accounts, per-user API keys and the MCP OAuth provider — one library,
-// Better Auth, on the app's own Postgres. Framework-free like src/services:
+// Accounts and per-user API keys — one library, Better Auth, on the app's
+// own Postgres. Framework-free like src/services:
 // the Next.js app builds one instance from getDb() (lib/auth.ts), tests build
 // one over their own database with createAuth(db).
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
-import { admin, jwt } from "better-auth/plugins";
+import { admin } from "better-auth/plugins";
 import { nextCookies } from "better-auth/next-js";
 import { apiKey } from "@better-auth/api-key";
-import { mcp } from "@better-auth/mcp";
-import { cimd } from "@better-auth/cimd";
-import { fetchClientMetadataResource } from "@better-auth/cimd/node";
 import type { Db } from "../db/client";
 import * as schema from "../db/schema";
 
@@ -22,7 +19,34 @@ export interface AuthOptions {
   secret: string;
 }
 
-export function mcpResource(baseURL: string): string {
+/**
+ * What a key may do. Every key reads (browse, see your orders); only a
+ * read & write key books and refunds.
+ */
+export const KEY_SCOPES = {
+  read: { tickets: ["read"] },
+  "read-write": { tickets: ["read", "write"] },
+} as const;
+export type KeyScope = keyof typeof KEY_SCOPES;
+
+/** "tickets:read", "tickets:write" — a key's permissions as flat scopes. */
+export function scopesOf(permissions: unknown): string[] {
+  const p = typeof permissions === "string" ? safeJson(permissions) : permissions;
+  if (!p || typeof p !== "object") return [];
+  return Object.entries(p as Record<string, unknown>).flatMap(([resource, actions]) =>
+    Array.isArray(actions) ? actions.map((a) => `${resource}:${String(a)}`) : [],
+  );
+}
+
+function safeJson(s: string): unknown {
+  try {
+    return JSON.parse(s);
+  } catch {
+    return null;
+  }
+}
+
+export function mcpEndpoint(baseURL: string): string {
   return new URL("/api/mcp", baseURL).toString();
 }
 
@@ -40,15 +64,9 @@ export function createAuth(db: Db, { baseURL, secret }: AuthOptions) {
         startingCharactersConfig: { charactersLength: API_KEY_PREFIX.length + 5 },
         // The plugin's default is 10 requests a day — far too low for an agent.
         rateLimit: { enabled: true, timeWindow: 60_000, maxRequests: 120 },
+        // A key made without a choice acts as you: read and write.
+        permissions: { defaultPermissions: { tickets: ["read", "write"] } },
       }),
-      jwt(),
-      mcp({
-        loginPage: "/sign-in",
-        consentPage: "/consent",
-        resource: mcpResource(baseURL),
-        scopes: ["openid", "profile", "email", "offline_access", "tickets:read", "tickets:write"],
-      }),
-      cimd({ fetchClientMetadataResource, metadataProfile: "mcp-2026-07-28" }),
       nextCookies(),
     ],
   });

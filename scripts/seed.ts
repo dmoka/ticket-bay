@@ -169,11 +169,10 @@ const CUSTOMERS = Array.from({ length: 140 }, () => {
   const ascii = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
   return { name: `${first} ${last}`, email: `${ascii(first)}.${ascii(last)}@${pick(DOMAINS)}` };
 });
-// The demo accounts. Anna has a history worth showing on "My orders"; Ben has
-// one order, so the MCP demo can show that Ben's key never sees Anna's.
+// The demo accounts: one customer with a history worth showing on "My orders"
+// (and in the MCP demo), and one admin for the dashboard.
 export const DEMO_PASSWORD = "ticketbay-demo";
 export const DEMO_CUSTOMER = { name: "Anna Kovács", email: "anna@ticketbay.test" };
-export const DEMO_CUSTOMER_B = { name: "Ben Weber", email: "ben@ticketbay.test" };
 export const DEMO_ADMIN = { name: "Olivia Admin", email: "admin@ticketbay.test" };
 
 function quantity(): number {
@@ -230,10 +229,6 @@ demo("midnight-arcade-neon-tour", 2, 9);
 demo("craftconf-agents-in-production", 1, 21);
 demo("velvet-static-live", 2, 35);
 demo("comedy-cellar-open-mic", 4, 3);
-{
-  const ev = EVENTS.find((e) => e.id === "balaton-sound-weekend")!;
-  drafts.push({ ev, startMs: startOf(ev), qty: 2, createdAtMs: NOW - 6 * DAY, customer: DEMO_CUSTOMER_B });
-}
 
 drafts.sort((a, b) => a.createdAtMs - b.createdAtMs);
 
@@ -282,7 +277,7 @@ for (const d of drafts) {
 
   // 3. Some customers cancel. Sold-out shows stay sold out; the demo customer
   // cancels exactly one order (the past one, after the fact — refund 0).
-  const isDemo = d.customer === DEMO_CUSTOMER || d.customer === DEMO_CUSTOMER_B;
+  const isDemo = d.customer === DEMO_CUSTOMER;
   const late = d.ev.inDays < 0 && (isDemo || rand() < 0.03);
   const early = !isDemo && d.ev.sell < 1 && rand() < 0.08;
   if (late || early) {
@@ -316,7 +311,7 @@ for (const d of drafts) {
 await db.execute(sql`TRUNCATE ${orders}, ${user} CASCADE`);
 const auth = createAuth(db, { baseURL: process.env.BETTER_AUTH_URL ?? "http://localhost:3000", secret: process.env.BETTER_AUTH_SECRET! });
 const accountIds = new Map<string, string>();
-for (const a of [DEMO_CUSTOMER, DEMO_CUSTOMER_B, DEMO_ADMIN]) {
+for (const a of [DEMO_CUSTOMER, DEMO_ADMIN]) {
   const res = await auth.api.signUpEmail({ body: { name: a.name, email: a.email, password: DEMO_PASSWORD } });
   accountIds.set(a.email, res.user.id);
 }
@@ -349,4 +344,4 @@ await closeDb(db);
 
 const refunded = rows.filter((r) => r.status === "refunded").length;
 console.log(`seeded ${new URL(databaseUrl()).pathname.slice(1)}: ${EVENTS.length} events, ${rows.length} orders (${refunded} refunded), ${CODES.length} discount codes`);
-console.log(`demo accounts (password "${DEMO_PASSWORD}"): ${DEMO_CUSTOMER.email}, ${DEMO_CUSTOMER_B.email}, ${DEMO_ADMIN.email} (admin)`);
+console.log(`demo accounts (password "${DEMO_PASSWORD}"): ${DEMO_CUSTOMER.email}, ${DEMO_ADMIN.email} (admin)`);

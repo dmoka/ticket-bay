@@ -12,15 +12,8 @@
     {
       "idx": 1,
       "version": "7",
-      "when": 1790343391146,
-      "tag": "0001_accounts_and_mcp",
-      "breakpoints": true
-    },
-    {
-      "idx": 2,
-      "version": "7",
-      "when": 1790358606428,
-      "tag": "0002_refund_reason",
+      "when": 1790360194051,
+      "tag": "0001_accounts_api_keys_refund_reason",
       "breakpoints": true
     }
   ]

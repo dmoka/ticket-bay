@@ -1,25 +1,22 @@
 import Link from "next/link";
 import { getDb } from "@/src/db/client";
-import { cancelImpact, listEventsAdmin } from "@/src/db/admin-queries";
+import { listEventsAdmin } from "@/src/db/admin-queries";
 import { now } from "@/lib/clock";
 import { date, money, num, time } from "@/lib/format";
 import { CATEGORY_LABEL, eventStatus } from "@/lib/status";
 import { Meter, Mono, PageHeader, StatusBadge, Tag } from "@/components/app/primitives";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { CancelEventDialog } from "./cancel-event-dialog";
 import { RetryRefunds } from "./retry-refunds";
 import { listUnpaidCancelRefunds } from "@/src/db/orders-repo";
 
 export const metadata = { title: "Events" };
 
-export default async function AdminEvents({ searchParams }: { searchParams: Promise<{ cancel?: string; via?: string }> }) {
+export default async function AdminEvents({ searchParams }: { searchParams: Promise<{ cancelled?: string }> }) {
   const sp = await searchParams;
   const nowMs = await now();
   const rows = await listEventsAdmin(getDb());
-  // Deep link from the cancel_event MCP tool (or the row's Cancel… link).
-  const toCancel = rows.find((r) => r.event.id === sp.cancel && r.event.cancelledAtMs === null && r.event.startsAtMs > nowMs)?.event;
-  const impact = toCancel ? await cancelImpact(getDb(), toCancel.id) : null;
-  const justCancelled = rows.find((r) => r.event.id === sp.cancel && r.event.cancelledAtMs !== null);
+  // Back from the event's cancel page: report what the cancellation did.
+  const justCancelled = rows.find((r) => r.event.id === sp.cancelled && r.event.cancelledAtMs !== null);
   const unpaid = justCancelled ? (await listUnpaidCancelRefunds(getDb(), justCancelled.event.id)).length : 0;
   const capacity = rows.reduce((s, r) => s + r.event.totalSeats, 0);
   const sold = rows.reduce((s, r) => s + r.event.seatsSold, 0);
@@ -40,14 +37,6 @@ export default async function AdminEvents({ searchParams }: { searchParams: Prom
           total.
           {unpaid > 0 && <RetryRefunds eventId={justCancelled.event.id} pending={unpaid} />}
         </div>
-      )}
-      {toCancel && impact && (
-        <CancelEventDialog
-          key={toCancel.id}
-          event={{ id: toCancel.id, name: toCancel.name, when: `${date(toCancel.startsAtMs)} ${time(toCancel.startsAtMs)}` }}
-          impact={impact}
-          fromAgent={sp.via === "mcp"}
-        />
       )}
       <div className="surface">
         <Table>
@@ -111,7 +100,7 @@ export default async function AdminEvents({ searchParams }: { searchParams: Prom
                   </TableCell>
                   <TableCell className="py-1.5 pr-3 text-right">
                     {e.cancelledAtMs === null && e.startsAtMs > nowMs && (
-                      <Link href={`/admin/events?cancel=${e.id}`} className="text-[12px] text-muted-foreground hover:text-foreground hover:underline">
+                      <Link href={`/admin/events/${e.id}/cancel`} className="text-[12px] text-muted-foreground hover:text-foreground hover:underline">
                         Cancel…
                       </Link>
                     )}

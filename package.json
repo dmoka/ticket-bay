@@ -2,7 +2,7 @@
   "name": "ticketbay",
   "version": "2.0.0",
   "private": true,
-  "description": "TicketBay \u2014 the reference ticketing app for the AI Agent Engineer course",
+  "description": "TicketBay — the reference ticketing app for the AI Agent Engineer course",
   "type": "module",
   "scripts": {
     "dev": "next dev",
@@ -26,8 +26,6 @@
   },
   "dependencies": {
     "@better-auth/api-key": "^1.7.6",
-    "@better-auth/cimd": "^1.7.6",
-    "@better-auth/mcp": "^1.7.6",
     "@modelcontextprotocol/server": "^2.1.0",
     "better-auth": "^1.7.6",
     "class-variance-authority": "^0.7.1",

@@ -1,11 +1,8 @@
 import { headers } from "next/headers";
 import { getAuth, requireSession, appBaseURL } from "@/lib/auth";
-import { mcpResource } from "@/src/auth/auth";
+import { mcpEndpoint, scopesOf } from "@/src/auth/auth";
 import { SectionLabel } from "@/components/app/primitives";
-import { getDb } from "@/src/db/client";
-import { clientNames } from "@/src/db/oauth-clients-repo";
 import { ApiKeysPanel, type KeyRow } from "./api-keys-panel";
-import { ConnectedApps, type AppRow } from "./connected-apps";
 
 export const metadata = { title: "Developers" };
 
@@ -20,17 +17,9 @@ export default async function DevelopersPage() {
     start: k.start ?? "tb_",
     createdAt: new Date(k.createdAt).getTime(),
     lastUsedAt: k.lastRequest ? new Date(k.lastRequest).getTime() : null,
+    canWrite: scopesOf(k.permissions).includes("tickets:write"),
   }));
-  const consents = (await auth.api.getOAuthConsents({ headers: h })) as { id: string; clientId: string; scopes: string[] | string; createdAt: Date | string }[];
-  const names = await clientNames(getDb(), consents.map((c) => c.clientId));
-  const apps: AppRow[] = consents.map((c) => ({
-    id: c.id,
-    clientId: c.clientId,
-    name: names.get(c.clientId) ?? null,
-    scopes: Array.isArray(c.scopes) ? c.scopes : String(c.scopes).split(" "),
-    createdAt: new Date(c.createdAt).getTime(),
-  }));
-  const endpoint = mcpResource(appBaseURL());
+  const endpoint = mcpEndpoint(appBaseURL());
 
   return (
     <div className="mx-auto max-w-3xl">
@@ -53,15 +42,12 @@ export default async function DevelopersPage() {
           </pre>
         </div>
         <p className="text-muted-foreground">
-          Without a key, agents can still browse events and prices. Booking, your orders and refunds need a key — or connect a chat app with its Connect button (OAuth).
+          Without a key, agents can still browse events, prices and the help docs. Your orders need a key; booking and refunds need a read &amp; write key.
         </p>
       </div>
 
       <SectionLabel className="mt-8 mb-3">API keys</SectionLabel>
       <ApiKeysPanel keys={keys} />
-
-      <SectionLabel className="mt-8 mb-3">Connected apps</SectionLabel>
-      <ConnectedApps apps={apps} />
     </div>
   );
 }

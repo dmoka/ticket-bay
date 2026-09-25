@@ -1,6 +1,6 @@
 // TicketBay's MCP tools, defined once and served twice: over stdio by
 // mcp/server.ts (public tools only, no auth) and over Streamable HTTP by
-// app/api/mcp (public + private tools, the caller from an API key or OAuth).
+// app/api/mcp (public + private tools, the caller from their API key).
 //
 // The tools are thin: every rule — prices, discounts, seats, refunds — lives
 // in src/domain and src/services, exactly as the web app uses it. A tool only
@@ -19,6 +19,7 @@ import { buildInvoice, EARLY_BIRD_PERCENT, earlyBirdApplies, earlyBirdEndsMs } f
 import { priceTiers } from "../domain/pricing";
 import type { PaymentProvider } from "../payments";
 import { cancelOwnOrder, OrderError, placeOrder, quoteOrder } from "../services/orders";
+import { loadHelpDocs, searchDocs } from "./docs";
 
 /** Who is calling. null = anonymous: public tools only. */
 export type Caller = {
@@ -26,10 +27,8 @@ export type Caller = {
   email: string;
   name: string;
   role: string | null;
-  /** how the caller proved who they are */
-  via: "api-key" | "oauth";
-  /** OAuth scopes granted to the token; API keys act with the user's full rights */
-  scopes: string[] | null;
+  /** what the caller's API key may do: "tickets:read", "tickets:write" */
+  scopes: string[];
 } | null;
 
 export interface ToolDeps {
@@ -40,10 +39,10 @@ export interface ToolDeps {
   baseURL: string;
 }
 
-export const PUBLIC_TOOLS = ["list_events", "get_event", "quote_price"] as const;
+export const PUBLIC_TOOLS = ["list_events", "get_event", "quote_price", "search_docs"] as const;
 export const PRIVATE_TOOLS = ["book_tickets", "my_orders", "refund_order", "cancel_event"] as const;
 
-/** The OAuth scope each private tool needs. API-key callers skip this check. */
+/** The key scope each private tool needs. A read-only key gets tickets:read only. */
 const SCOPE: Record<(typeof PRIVATE_TOOLS)[number], string> = {
   book_tickets: "tickets:write",
   my_orders: "tickets:read",
@@ -54,7 +53,7 @@ const SCOPE: Record<(typeof PRIVATE_TOOLS)[number], string> = {
 export const UNAUTHENTICATED_MESSAGE =
   "Unauthorized (401): this tool acts on a customer's account, so it needs one. " +
   "Create an API key in TicketBay under Settings → Developers and send it as `Authorization: Bearer tb_…`, " +
-  "or connect with OAuth. Browsing tools (list_events, get_event, quote_price) work without a key.";
+  "Browsing tools (list_events, get_event, quote_price, search_docs) work without a key.";
 
 const TZ = "Europe/Budapest";
 const ymd = new Intl.DateTimeFormat("en-CA", { year: "numeric", month: "2-digit", day: "2-digit", timeZone: TZ });
@@ -177,7 +176,8 @@ export function createTicketBayServer(deps: ToolDeps, caller: Caller, opts: { in
         (opts.includePrivate
           ? "book_tickets charges the customer's card; always quote first and get the customer's explicit yes. " +
             "refund_order cannot be undone; say the refund amount from my_orders before calling it."
-          : "This local server only browses. Booking needs TicketBay's remote MCP server with an API key."),
+          : "This local server only browses. Booking needs TicketBay's remote MCP server with an API key.") +
+        " For questions about refunds, discounts, fees or API keys, call search_docs and answer from the docs.",
     },
   );
   const { db, now, baseURL } = deps;
@@ -245,7 +245,7 @@ export function createTicketBayServer(deps: ToolDeps, caller: Caller, opts: { in
         early_bird: eb
           ? { applies: true, percent_off: EARLY_BIRD_PERCENT, ends_at: localTime(earlyBirdEndsMs({ startMs: ev.startsAtMs })) }
           : { applies: false, note: `Early-bird (${EARLY_BIRD_PERCENT}% off) ends 30 days before the event.` },
-        service_fee: "3% of the ticket amount, added at checkout, not refundable",
+        service_fee: "3% of the ticket amount after discounts, at least €1.00 and at most €20.00, added at checkout, not refundable",
         url: new URL(`/events/${ev.id}`, baseURL).toString(),
       });
     },
@@ -287,17 +287,47 @@ export function createTicketBayServer(deps: ToolDeps, caller: Caller, opts: { in
       }),
   );
 
+  server.registerTool(
+    "search_docs",
+    {
+      title: "Search the help docs",
+      description:
+        "Search TicketBay's help pages — refund policy, early-bird and discounts, fees, API keys — and return the best-matching sections, " +
+        "quoted verbatim with their source file. Use it for any question about rules or policy (e.g. 'how do refunds work for early-bird tickets?') " +
+        "and answer from what it returns, not from general knowledge.",
+      inputSchema: z.object({
+        query: z.string().min(2).max(200).describe("The question or keywords, e.g. 'refund early-bird tickets'."),
+        limit: z.number().int().min(1).max(5).default(3),
+      }),
+      annotations: { readOnlyHint: true, openWorldHint: false },
+    },
+    async ({ query, limit }) => {
+      const hits = searchDocs(loadHelpDocs(), query, limit);
+      if (hits.length === 0) return json({ query, results: [], note: "No help section matches. Try other words, or say the docs do not cover it." });
+      return json({
+        query,
+        results: hits.map((h) => ({ page: h.page, section: h.heading, source: h.file, text: h.text })),
+      });
+    },
+  );
+
   if (!opts.includePrivate) return server;
 
   // ---- Private tools: act for one customer. ---------------------------------
 
-  /** The caller, or a 401-style tool error. Scope checks happen in scopeChallenge. */
-  const who = (): NonNullable<Caller> | CallToolResult => caller ?? fail(UNAUTHENTICATED_MESSAGE);
+  /** The caller if their key allows this tool, else a 401/403-style tool error the agent can read. */
+  const who = (tool: (typeof PRIVATE_TOOLS)[number]): NonNullable<Caller> | CallToolResult => {
+    if (!caller) return fail(UNAUTHENTICATED_MESSAGE);
+    if (!caller.scopes.includes(SCOPE[tool])) {
+      return fail(
+        `Forbidden (403): ${tool} needs a key with the ${SCOPE[tool]} scope, and this key is ` +
+          `${caller.scopes.includes("tickets:read") ? "read-only" : "not allowed to use it"}. ` +
+          "Create a read & write key under Settings → Developers if the customer wants the agent to do this.",
+      );
+    }
+    return caller;
+  };
   const isResult = (x: unknown): x is CallToolResult => typeof x === "object" && x !== null && "content" in x;
-  const scopeChallenge = (tool: (typeof PRIVATE_TOOLS)[number]) => () =>
-    caller?.via === "oauth" && !caller.scopes?.includes(SCOPE[tool])
-      ? { scopes: [SCOPE[tool]] as [string], errorDescription: `${tool} needs the ${SCOPE[tool]} scope` }
-      : undefined;
 
   server.registerTool(
     "book_tickets",
@@ -307,7 +337,7 @@ export function createTicketBayServer(deps: ToolDeps, caller: Caller, opts: { in
         "Book and PAY for tickets as the signed-in customer: charges their card on file and returns the order. " +
         "Call quote_price first, show the customer the total, and only book after they say yes. " +
         "Pass the same idempotency_key only to retry after a timeout or lost reply (you get the same order back, never a second charge); " +
-        "after a booking error, use a NEW key. Requires an API key.",
+        "after a booking error, use a NEW key. Requires a read & write API key.",
       inputSchema: z.object({
         event_id: z.string(),
         quantity: z.number().int().min(1).max(50),
@@ -316,10 +346,9 @@ export function createTicketBayServer(deps: ToolDeps, caller: Caller, opts: { in
         idempotency_key: z.string().max(100).optional().describe("Any unique string for this purchase; reuse it only to retry the same purchase."),
       }),
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },
-      scopeChallenge: scopeChallenge("book_tickets"),
     },
     async (args) => {
-      const c = who();
+      const c = who("book_tickets");
       if (isResult(c)) return c;
       return run(async () => {
         const nowMs = now();
@@ -348,13 +377,12 @@ export function createTicketBayServer(deps: ToolDeps, caller: Caller, opts: { in
       title: "My orders",
       description:
         "The signed-in customer's orders, newest first: event, tickets, amount paid, status, and — for paid orders — how much a refund would return right now. " +
-        "Only ever shows the caller's own orders. Requires an API key.",
+        "Only ever shows the caller's own orders. Requires an API key (read-only is enough).",
       inputSchema: z.object({ status: z.enum(["paid", "refunded", "all"]).default("all") }),
       annotations: { readOnlyHint: true, openWorldHint: false },
-      scopeChallenge: scopeChallenge("my_orders"),
     },
     async ({ status }) => {
-      const c = who();
+      const c = who("my_orders");
       if (isResult(c)) return c;
       const nowMs = now();
       const rows = (await listOrdersByUser(db, c.userId)).filter(({ order }) => status === "all" || order.status === status);
@@ -369,13 +397,12 @@ export function createTicketBayServer(deps: ToolDeps, caller: Caller, opts: { in
       description:
         "Cancel one of the customer's own orders and refund it NOW, by TicketBay's refund rules (refund fee kept; nothing back once the event has started). " +
         "Cannot be undone. Tell the customer the refund amount from my_orders and get an explicit yes first. " +
-        "Returns the refund and a link to the order page. Requires an API key.",
+        "Returns the refund and a link to the order page. Requires a read & write API key.",
       inputSchema: z.object({ order_id: orderIdInput }),
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
-      scopeChallenge: scopeChallenge("refund_order"),
     },
     async ({ order_id }) => {
-      const c = who();
+      const c = who("refund_order");
       if (isResult(c)) return c;
       return run(async () => {
         const id = parseOrderId(order_id);
@@ -402,10 +429,9 @@ export function createTicketBayServer(deps: ToolDeps, caller: Caller, opts: { in
         "it returns a link to the admin dashboard, where a human reviews the impact and confirms. Give the link to the user.",
       inputSchema: z.object({ event_id: z.string() }),
       annotations: { readOnlyHint: true, openWorldHint: false },
-      scopeChallenge: scopeChallenge("cancel_event"),
     },
     async ({ event_id }) => {
-      const c = who();
+      const c = who("cancel_event");
       if (isResult(c)) return c;
       if (c.role !== "admin") return fail("Forbidden (403): only TicketBay admins can cancel events.");
       const ev = await getEvent(db, event_id);
@@ -413,8 +439,7 @@ export function createTicketBayServer(deps: ToolDeps, caller: Caller, opts: { in
       if (ev.cancelledAtMs !== null) return fail(`${ev.name} is already cancelled.`);
       if (ev.startsAtMs <= now()) return fail(`${ev.name} has already started — a past event cannot be cancelled.`);
       const impact = await cancelImpact(db, ev.id);
-      const url = new URL("/admin/events", baseURL);
-      url.searchParams.set("cancel", ev.id);
+      const url = new URL(`/admin/events/${encodeURIComponent(ev.id)}/cancel`, baseURL);
       url.searchParams.set("via", "mcp");
       return json({
         cancelled: false,
