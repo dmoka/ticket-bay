@@ -14,11 +14,11 @@ import type { Auth } from "../../src/auth/auth";
 import type { Db } from "../../src/db/client";
 import { getEvent } from "../../src/db/events-repo";
 import { getOrder } from "../../src/db/orders-repo";
-import { orders, user } from "../../src/db/schema";
+import { events, orders, user } from "../../src/db/schema";
 import { resolveCaller } from "../../src/mcp/caller";
 import { UNAUTHENTICATED_MESSAGE } from "../../src/mcp/tools";
 import { useTestDatabase } from "./database";
-import { DAY, venue } from "./fixtures";
+import { DAY, HOUR, venue } from "./fixtures";
 import {
   BASE_URL,
   ban,
@@ -307,6 +307,21 @@ describe("cancel_event (admin) only prepares the cancellation", () => {
     expect(r).toMatchObject({ isError: true });
     expect(r.text).toMatch(/403/);
     expect((await getEvent(t.db, ev.id))!.cancelledAtMs).toBeNull();
+  });
+
+  it("an admin is refused for an event that has already started; nothing changes", async () => {
+    const anna = await customer(auth, "Anna");
+    const boss = await customer(auth, "Boss");
+    await makeAdmin(t.db, boss.id);
+    const ev = await upcoming(t.db);
+    const booked = await book(anna, ev.id, 2);
+    await t.db.update(events).set({ startsAtMs: Date.now() - HOUR }).where(eq(events.id, ev.id));
+    const r = toolResult(await call("cancel_event", { event_id: ev.id }, bearer(boss.key)));
+    expect(r.isError).toBe(true);
+    expect(r.text).toMatch(/already started/);
+    expect(r.text).not.toContain("confirm");
+    expect((await getEvent(t.db, ev.id))!.cancelledAtMs).toBeNull();
+    expect((await getOrder(t.db, booked.order_id))!.status).toBe("paid");
   });
 
   it("an admin gets the impact and a confirm link; the event is NOT cancelled and no order is refunded", async () => {

@@ -11,12 +11,16 @@
 //     included, fee not) — a customer is never shown one price and charged another.
 //  3. quote_price's line items reconcile: ticket subtotal + discount line = Tickets,
 //     Tickets + service fee = Total, Total = total_eur; VAT sits inside the total.
-//     The discount label's parts add up to the headline discount percent.
+//     The discount label: without a "capped at N%" clause its parts add up to the
+//     headline percent; with it, the parts add up to MORE than the headline and the
+//     headline equals the cap N (which is 100).
 //  4. quote_price's total is exactly what book_tickets then charges at the same instant.
 //  5. my_orders' refund_breakdown reconciles with what was paid: tickets part +
-//     service fee = total paid; refund ≤ tickets paid; refund = tickets paid −
-//     refund fee (the rule the breakdown itself states); refund_eur equals
-//     refund_if_cancelled_now_eur; refund_order at the same instant pays exactly that.
+//     service fee = total paid; 0 ≤ refund ≤ tickets paid; refund_eur equals
+//     refund_if_cancelled_now_eur; and each shape obeys the rule it states —
+//     window open: refund = tickets paid − refund fee; window closed (the event has
+//     started): refund = 0 and no refund fee is listed. refund_order at the same
+//     instant pays exactly what my_orders promised.
 //  6. Every spelling of an order id ("TB-00144", "tb-144", "144", 144) names the
 //     same order, and any schema-valid id that is not the caller's own order is
 //     a readable "Order not found." tool error — never a thrown exception.
@@ -30,6 +34,9 @@ import { createFakeStripe } from "../../src/payments";
 import { useTestDatabase } from "./database";
 
 const t = useTestDatabase();
+
+/** The value type an arbitrary generates. */
+type ValueOf<A> = A extends fc.Arbitrary<infer T> ? T : never;
 
 const MIN = 60_000;
 const HOUR = 60 * MIN;
@@ -109,7 +116,7 @@ const eventSpec = fc.record({
   cancelled: fc.boolean(),
 });
 
-async function seedEvents(nowMs: number, specs: fc.RecordValue<typeof eventSpec>[] | readonly { start: number; priceCents: number; category: (typeof CATEGORIES)[number]; totalSeats: number; soldOut: boolean; cancelled: boolean }[]) {
+async function seedEvents(nowMs: number, specs: readonly { start: number; priceCents: number; category: (typeof CATEGORIES)[number]; totalSeats: number; soldOut: boolean; cancelled: boolean }[]) {
   const rows = [];
   for (const [i, s] of specs.entries()) {
     rows.push(
@@ -238,7 +245,7 @@ describe("quote_price", () => {
     codePercent: fc.option(fc.oneof(fc.constantFrom(1, 50, 99, 100), fc.integer({ min: 1, max: 100 })), { nil: undefined }),
   });
 
-  async function seedQuote(q: fc.RecordValue<typeof quoteInput>) {
+  async function seedQuote(q: ValueOf<typeof quoteInput>) {
     await reset();
     await seedEvents(q.nowMs, [{ start: q.start, priceCents: q.priceCents, category: "concert", totalSeats: 60, soldOut: false, cancelled: false }]);
     if (q.codePercent !== undefined) await t.db.insert(discountCodes).values({ code: "PROP", percent: q.codePercent, createdAtMs: q.nowMs - DAY });
@@ -276,7 +283,7 @@ describe("quote_price", () => {
   );
 
   it(
-    "the discount label's parts add up to the headline discount percent",
+    "the discount label's parts add up to the headline percent, or exceed it only with a 'capped at' clause equal to the headline",
     async () => {
       await fc.assert(
         fc.asyncProperty(quoteInput, async (q) => {
@@ -284,9 +291,17 @@ describe("quote_price", () => {
           const res = body(await tools(q.nowMs)("quote_price", { event_id: "ev-0", quantity: q.quantity, discount_code: q.codePercent ? "prop" : undefined }));
           const line = (res.line_items as { label: string }[]).find((i) => i.label.startsWith("Discount"));
           if (!line) return;
-          const m = /^Discount (\d+)% \((.*)\)$/.exec(line.label)!;
-          const parts = [...m[2].matchAll(/(\d+)%/g)].reduce((s, p) => s + Number(p[1]), 0);
-          expect(parts).toBe(Number(m[1]));
+          const m = /^Discount (\d+)% \((.*?)(?:, capped at (\d+)%)?\)$/.exec(line.label);
+          expect(m, line.label).not.toBeNull();
+          const headline = Number(m![1]);
+          const parts = [...m![2].matchAll(/(\d+)%/g)].reduce((s, p) => s + Number(p[1]), 0);
+          if (m![3] === undefined) {
+            expect(parts).toBe(headline);
+          } else {
+            expect(parts).toBeGreaterThan(headline);
+            expect(headline).toBe(Number(m![3]));
+            expect(headline).toBe(100);
+          }
         }),
         RUNS,
       );
@@ -340,7 +355,7 @@ describe("my_orders refund_breakdown and refund_order", () => {
     viewDelta: fc.oneof(fc.integer({ min: -2, max: 2 }), fc.integer({ min: -30 * DAY, max: 5 * DAY })),
   });
 
-  async function book(s: fc.RecordValue<typeof scenario>, payments = createFakeStripe("sk_test_property")) {
+  async function book(s: ValueOf<typeof scenario>, payments = createFakeStripe("sk_test_property")) {
     await reset();
     await ensureUsers();
     await seedEvents(s.bookAt, [{ start: s.start, priceCents: s.priceCents, category: "concert", totalSeats: 40, soldOut: false, cancelled: false }]);
@@ -352,7 +367,7 @@ describe("my_orders refund_breakdown and refund_order", () => {
   }
 
   it(
-    "the breakdown reconciles with what was paid and follows its own stated rule",
+    "the breakdown reconciles with what was paid and each shape (window open / closed) obeys the rule it states",
     async () => {
       await fc.assert(
         fc.asyncProperty(scenario, async (s) => {
@@ -365,10 +380,18 @@ describe("my_orders refund_breakdown and refund_order", () => {
           expect(cents(b.refund_eur)).toBe(cents(o.refund_if_cancelled_now_eur));
           expect(cents(b.refund_eur)).toBeGreaterThanOrEqual(0);
           expect(cents(b.refund_eur)).toBeLessThanOrEqual(cents(b.tickets_paid_eur));
-          expect(cents(b.refund_fee_eur)).toBeGreaterThanOrEqual(0);
           expect(o.refund_window_open).toBe(viewAt < startsAt);
-          // "refund = tickets paid − refund fee"
-          expect(cents(b.tickets_paid_eur) - cents(b.refund_fee_eur)).toBe(cents(b.refund_eur));
+          if (o.refund_window_open) {
+            // "refund = tickets paid − refund fee"
+            expect(b.rule).toMatch(/^refund = tickets paid − refund fee/);
+            expect(cents(b.refund_fee_eur)).toBeGreaterThanOrEqual(0);
+            expect(cents(b.tickets_paid_eur) - cents(b.refund_fee_eur)).toBe(cents(b.refund_eur));
+          } else {
+            // "the event has started: nothing is refunded"
+            expect(b.rule).toMatch(/^the event has started: nothing is refunded/);
+            expect(b).not.toHaveProperty("refund_fee_eur");
+            expect(cents(b.refund_eur)).toBe(0);
+          }
         }),
         RUNS,
       );
@@ -392,7 +415,7 @@ describe("my_orders refund_breakdown and refund_order", () => {
 
           expect(r.order_id).toBe(id);
           expect(cents(r.refunded_eur)).toBe(cents(promised.refund_if_cancelled_now_eur));
-          expect(cents(r.refund_fee_kept_eur)).toBe(cents(promised.refund_breakdown.refund_fee_eur));
+          expect(cents(r.refund_fee_kept_eur)).toBe(cents(promised.refund_breakdown.refund_fee_eur ?? 0));
           expect(cents(r.refunded_eur)).toBeLessThanOrEqual(cents(promised.refund_breakdown.tickets_paid_eur));
 
           const after = body(await call("my_orders", { status: "refunded" })).orders[0];

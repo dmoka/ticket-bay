@@ -56,6 +56,8 @@ test("an admin cancels an event from the deep link, and every customer sees a fu
     "RockFest admin-cancel is cancelled. Sales are closed and 2 orders are refunded, €150.00 in total.",
   );
   await expect(dialog).toBeHidden();
+  // Every refund reached the payment provider: nothing is left to retry.
+  await expect(page.getByRole("button", { name: "Retry refunds" })).toHaveCount(0);
   await expect(page.getByRole("row").filter({ hasText: "RockFest admin-cancel" })).toContainText("Cancelled");
 
   // Each customer: "My orders" says Refunded, and the order page shows the

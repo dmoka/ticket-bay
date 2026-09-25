@@ -137,8 +137,8 @@ describe("marking an order refunded (real Postgres)", () => {
     const o = await insertOrder(t.db, anOrder());
     await markRefunded(t.db, o.id, refund);
     const after = (await getOrder(t.db, o.id))!;
-    expect({ ...after, status: "paid", refundedAtMs: null, refundCents: null, refundFeeCents: null, seatsReleased: null }).toEqual(o);
-    expect(after).toMatchObject({ status: "refunded", refundedAtMs: NOW, refundCents: 9_800, refundFeeCents: 200, seatsReleased: true });
+    expect({ ...after, status: "paid", refundedAtMs: null, refundCents: null, refundFeeCents: null, seatsReleased: null, refundReason: null }).toEqual(o);
+    expect(after).toMatchObject({ status: "refunded", refundedAtMs: NOW, refundCents: 9_800, refundFeeCents: 200, seatsReleased: true, refundReason: "customer" });
   });
 
   it("refuses to refund an order that does not exist", async () => {
