@@ -1,12 +1,13 @@
 // Order use cases: the seam between the domain rules, the database and the
 // payment provider. Framework-free — server actions call these with the real
 // clock, tests call them with any clock they like.
+import { randomUUID } from "node:crypto";
 import { bookTickets, seatsAvailable } from "../domain/booking";
 import { previewCancellation } from "../domain/cancellation";
 import { checkDiscountCode, normalizeCode, quote, type CodeCheck } from "../domain/pricing";
 import type { Invoice } from "../domain/invoice";
 import type { Db } from "../db/client";
-import { claimCheckout, releaseCheckout } from "../db/checkout-claims-repo";
+import { claimCheckout, holdClaim, releaseCheckout } from "../db/checkout-claims-repo";
 import { getCode, getCodeForUpdate, incrementUses, toDomainCode } from "../db/codes-repo";
 import { adjustSeatsSold, getEvent, getEventForUpdate, markEventCancelled, toDomainEvent } from "../db/events-repo";
 import {
@@ -130,6 +131,7 @@ export async function placeOrder(deps: Deps, input: PlaceOrderInput): Promise<{ 
   // The first attempt claims the key with a row; a second one polls — holding
   // no database connection — until the claim is gone, then decides on what
   // the first attempt left behind.
+  const token = randomUUID();
   const deadline = Date.now() + CLAIM_WAIT_MS;
   for (;;) {
     const previous = await getOrderByIdempotencyKey(deps.db, input.idempotencyKey);
@@ -137,20 +139,20 @@ export async function placeOrder(deps: Deps, input: PlaceOrderInput): Promise<{ 
       if (previous.userId !== (input.userId ?? null)) throw new OrderError("This checkout was already used. Start a new one.");
       return { order: previous, replayed: true };
     }
-    if (await claimCheckout(deps.db, input.idempotencyKey, Date.now(), CLAIM_STALE_MS)) break;
+    if (await claimCheckout(deps.db, input.idempotencyKey, token, CLAIM_STALE_MS)) break;
     if (Date.now() >= deadline) {
       throw new OrderError("This checkout is still being processed. Try again in a moment with the same idempotency key.");
     }
     await sleep(CLAIM_POLL_MS);
   }
   try {
-    return await placeOrderOnce(deps, input);
+    return await placeOrderOnce(deps, input, token);
   } finally {
-    await releaseCheckout(deps.db, input.idempotencyKey);
+    await releaseCheckout(deps.db, input.idempotencyKey, token);
   }
 }
 
-async function placeOrderOnce(deps: Deps, input: PlaceOrderInput): Promise<{ order: OrderRow; replayed: boolean }> {
+async function placeOrderOnce(deps: Deps, input: PlaceOrderInput, token: string): Promise<{ order: OrderRow; replayed: boolean }> {
   const { db, payments, nowMs } = deps;
   const previous = await getOrderByIdempotencyKey(db, input.idempotencyKey);
   if (previous) {
@@ -182,6 +184,11 @@ async function placeOrderOnce(deps: Deps, input: PlaceOrderInput): Promise<{ ord
 
   try {
     const order = await db.transaction(async (tx) => {
+      // Only the attempt that holds the claim may book. If a newer attempt took
+      // it over (ours ran past the stale limit), stop: that attempt decides.
+      if (!(await holdClaim(tx, input.idempotencyKey, token))) {
+        throw new OrderError("This checkout took too long and was taken over by a newer attempt. Check your orders before retrying.");
+      }
       // Re-check against the row as it is NOW: another checkout may have taken
       // the last seats while the card was being charged. The row lock makes a
       // concurrent checkout for the same event wait here until this one commits.
@@ -224,16 +231,24 @@ async function placeOrderOnce(deps: Deps, input: PlaceOrderInput): Promise<{ ord
     });
     return { order, replayed: false };
   } catch (e) {
-    // Two submits with the same key at once: both got the same charge, one
-    // inserted the order, this one lost on the unique key. The charge belongs
-    // to the winner's order — voiding it would refund tickets that exist.
-    const winner = await getOrderByIdempotencyKey(db, input.idempotencyKey);
-    if (winner && winner.paymentId === charge.id) {
-      if (winner.userId !== (input.userId ?? null)) throw new OrderError("This checkout was already used. Start a new one.");
-      return { order: winner, replayed: true };
+    // The card was charged but this attempt booked nothing. Decide what to do
+    // with the charge holding the claim's row lock, so no other attempt with
+    // this key can book on it while we decide (and void).
+    const outcome = await db.transaction(async (tx) => {
+      const mine = await holdClaim(tx, input.idempotencyKey, token);
+      // Another attempt with this key already booked on this charge: it is theirs.
+      const winner = await getOrderByIdempotencyKey(tx, input.idempotencyKey);
+      if (winner && winner.paymentId === charge.id) return { kind: "winner" as const, winner };
+      // We lost the claim: the attempt that holds it owns this charge now.
+      if (!mine) return { kind: "not-ours" as const };
+      // Ours, and no order exists: give the money back.
+      await payments.refund(charge.id, charge.amountCents, `void-${input.idempotencyKey}`);
+      return { kind: "voided" as const };
+    });
+    if (outcome.kind === "winner") {
+      if (outcome.winner.userId !== (input.userId ?? null)) throw new OrderError("This checkout was already used. Start a new one.");
+      return { order: outcome.winner, replayed: true };
     }
-    // The card was charged but no order exists: give the money back.
-    await payments.refund(charge.id, charge.amountCents, `void-${input.idempotencyKey}`);
     throw e;
   }
 }

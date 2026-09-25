@@ -1,5 +1,5 @@
 {
-  "id": "1b20504e-4ace-4ca3-9560-93c4fa7c3e67",
+  "id": "f57bed48-3ccd-4a7d-95f3-1664121021b9",
   "prevId": "b87f7ae1-44b0-40c9-8215-ce0eca0eef88",
   "version": "7",
   "dialect": "postgresql",
@@ -12,6 +12,12 @@
           "name": "idempotency_key",
           "type": "text",
           "primaryKey": true,
+          "notNull": true
+        },
+        "token": {
+          "name": "token",
+          "type": "text",
+          "primaryKey": false,
           "notNull": true
         },
         "claimed_at_ms": {

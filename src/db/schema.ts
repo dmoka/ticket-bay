@@ -113,6 +113,9 @@ export const orders = pgTable(
  */
 export const checkoutClaims = pgTable("checkout_claims", {
   idempotencyKey: text("idempotency_key").primaryKey(),
+  /** which attempt holds the claim: only it may book, void, or release */
+  token: text("token").notNull(),
+  /** by the database's clock, so app servers with skewed clocks agree */
   claimedAtMs: instant("claimed_at_ms").notNull(),
 });
 
