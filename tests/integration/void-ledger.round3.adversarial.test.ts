@@ -25,7 +25,7 @@ async function newUser(): Promise<string> {
 /** Fake Stripe whose void refunds fail while `down` is true; charges lose the seats (sold out after charge). */
 function setup(evId: () => string) {
   const inner = createFakeStripe(`sk_test_ledger_${randomUUID().slice(0, 6)}`);
-  const state = { down: false, chargeIds: [] as string[] };
+  const state = { down: false, failNext: 0, voidCalls: 0, chargeIds: [] as string[] };
   const p: PaymentProvider = {
     ...inner,
     async charge(i) {
@@ -35,7 +35,14 @@ function setup(evId: () => string) {
       return c;
     },
     async refund(id, c, k) {
-      if (state.down && k.startsWith("void-")) throw new Error("processor timeout");
+      if (k.startsWith("void-")) {
+        state.voidCalls++;
+        if (state.down) throw new Error("processor timeout");
+        if (state.failNext > 0) {
+          state.failNext--;
+          throw new Error("processor blip");
+        }
+      }
       return inner.refund(id, c, k);
     },
     getCharge: (id) => inner.getCharge(id),
@@ -66,11 +73,42 @@ describe("ADVERSARIAL void ledger: a failed void refund", () => {
     s.state.down = true;
     const err = await placeOrder(deps(s.p), { eventId: ev.id, quantity: 2, email: `${uid}@example.com`, name: "F", userId: uid, idempotencyKey: `mcp:${uid}:v2` }).catch((e) => e);
     // The booking failed for a customer-facing reason (sold out); a provider
-    // hiccup on the void must not turn that into an internal error.
+    // outage on the void must not turn that into an internal error.
     expect(err, String(err)).toBeInstanceOf(OrderError);
+    // Human decision (catch K): keep the real reason and say the refund is pending.
+    expect((err as Error).message).toMatch(/sold out|not enough seats/i);
+    expect((err as Error).message).toMatch(/refund is pending.*same idempotency key/i);
   });
 
-  it("still gets the money back when the agent retries with a NEW key (as every refusal message tells it to)", async () => {
+  it("a single transient void-refund failure is absorbed by the retry: money back, plain readable refusal", async () => {
+    const ev = await venue(t.db, { totalSeats: 10, seatsSold: 8 });
+    const uid = await newUser();
+    const s = setup(() => ev.id);
+    s.state.failNext = 1;
+    const err = await placeOrder(deps(s.p), { eventId: ev.id, quantity: 2, email: `${uid}@example.com`, name: "F", userId: uid, idempotencyKey: `mcp:${uid}:blip` }).catch((e) => e);
+    expect(err).toBeInstanceOf(OrderError);
+    expect((err as Error).message).toMatch(/sold out|not enough seats/i);
+    expect((err as Error).message).not.toMatch(/pending/i);
+    expect(s.state.voidCalls).toBe(2);
+    const c = s.inner.getCharge(s.state.chargeIds[0]!)!;
+    expect(c.refundedCents).toBe(c.amountCents); // refunded exactly once, not twice
+    expect((await t.db.execute(sql`SELECT count(*)::int AS n FROM orders`)).rows[0]).toEqual({ n: 0 });
+  });
+
+  it("two transient failures in a row are still absorbed (3 attempts), and never over-refund", async () => {
+    const ev = await venue(t.db, { totalSeats: 10, seatsSold: 8 });
+    const uid = await newUser();
+    const s = setup(() => ev.id);
+    s.state.failNext = 2;
+    const err = await placeOrder(deps(s.p), { eventId: ev.id, quantity: 2, email: `${uid}@example.com`, name: "F", userId: uid, idempotencyKey: `mcp:${uid}:blip2` }).catch((e) => e);
+    expect(err).toBeInstanceOf(OrderError);
+    expect((err as Error).message).not.toMatch(/pending/i);
+    const c = s.inner.getCharge(s.state.chargeIds[0]!)!;
+    expect(c.refundedCents).toBe(c.amountCents);
+  });
+
+  // ACCEPTED RISK (human decision 2026-09-25): a void refund that fails past 3 retries completes only on a same-key retry; no sweeper by design
+  it.skip("still gets the money back when the agent retries with a NEW key (as every refusal message tells it to)", async () => {
     const ev = await venue(t.db, { totalSeats: 10, seatsSold: 8 });
     const uid = await newUser();
     const s = setup(() => ev.id);
@@ -84,7 +122,8 @@ describe("ADVERSARIAL void ledger: a failed void refund", () => {
     expect(first.refundedCents, "the first attempt's voided charge was never paid back").toBe(first.amountCents);
   });
 
-  it("still gets the money back when the same key is retried with a different quantity", async () => {
+  // ACCEPTED RISK (human decision 2026-09-25): a void refund that fails past 3 retries completes only on a same-key retry; no sweeper by design
+  it.skip("still gets the money back when the same key is retried with a different quantity", async () => {
     const ev = await venue(t.db, { totalSeats: 10, seatsSold: 8 });
     const uid = await newUser();
     const s = setup(() => ev.id);
