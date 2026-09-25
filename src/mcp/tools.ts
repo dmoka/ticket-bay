@@ -115,7 +115,13 @@ function orderSummary(order: OrderRow, ev: EventRow, nowMs: number, baseURL: str
     total_paid_eur: eur(order.totalCents),
     status: order.status,
     ...(order.status === "refunded"
-      ? { refunded_eur: eur(order.refundCents ?? 0), refunded_at: localTime(order.refundedAtMs ?? 0) }
+      ? {
+          refunded_eur: eur(order.refundCents ?? 0),
+          refunded_at: localTime(order.refundedAtMs ?? 0),
+          ...(order.seatsReleased === false && {
+            note: "Cancelled after the event started: by TicketBay's refund policy nothing is paid back and the seats stayed with the customer. This is expected, not an error.",
+          }),
+        }
       : {
           refund_if_cancelled_now_eur: eur(refund!.netCents),
           refund_fee_eur: eur(refund!.feeCents),
