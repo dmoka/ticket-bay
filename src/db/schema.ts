@@ -1,5 +1,8 @@
 import { sql } from "drizzle-orm";
 import { bigint, boolean, check, index, integer, pgTable, text } from "drizzle-orm/pg-core";
+import { user } from "./auth-schema";
+
+export * from "./auth-schema";
 
 // Money is integer cents everywhere. Instants are integer ms since epoch.
 // No numeric/real columns: a float in a money path is a bug waiting for a total.
@@ -25,6 +28,8 @@ export const events = pgTable(
     seatsSold: integer("seats_sold").notNull().default(0),
     priceCents: cents("price_cents").notNull(),
     createdAtMs: instant("created_at_ms").notNull(),
+    /** set when an admin cancels the event: sales stop, every paid order is refunded */
+    cancelledAtMs: instant("cancelled_at_ms"),
   },
   (t) => [
     check("events_seats_in_range", sql`${t.seatsSold} >= 0 AND ${t.seatsSold} <= ${t.totalSeats}`),
@@ -53,6 +58,11 @@ export const orders = pgTable(
     eventId: text("event_id")
       .notNull()
       .references(() => events.id),
+    /**
+     * The account that booked. Every order placed through the app or the MCP
+     * server has one; null only on rows from before accounts existed.
+     */
+    userId: text("user_id").references(() => user.id),
     customerEmail: text("customer_email").notNull(),
     customerName: text("customer_name").notNull(),
     quantity: integer("quantity").notNull(),
@@ -84,6 +94,7 @@ export const orders = pgTable(
   (t) => [
     index("orders_event_idx").on(t.eventId),
     index("orders_email_idx").on(t.customerEmail),
+    index("orders_user_idx").on(t.userId),
     index("orders_created_idx").on(t.createdAtMs),
     check("orders_quantity_positive", sql`${t.quantity} > 0`),
     check("orders_money_non_negative", sql`${t.ticketsCents} >= 0 AND ${t.totalCents} >= 0`),
@@ -95,3 +106,4 @@ export type EventRow = typeof events.$inferSelect;
 export type NewEventRow = typeof events.$inferInsert;
 export type OrderRow = typeof orders.$inferSelect;
 export type DiscountCodeRow = typeof discountCodes.$inferSelect;
+export type UserRow = typeof user.$inferSelect;
