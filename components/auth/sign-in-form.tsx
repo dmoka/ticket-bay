@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -11,6 +11,7 @@ import { FormError } from "./auth-card";
 
 export function SignInForm({ next, mode }: { next: string; mode: "sign-in" | "sign-up" }) {
   const router = useRouter();
+  const search = useSearchParams().toString();
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
@@ -38,7 +39,8 @@ export function SignInForm({ next, mode }: { next: string; mode: "sign-in" | "si
   }
 
   const other = mode === "sign-in" ? "/sign-up" : "/sign-in";
-  const query = typeof window === "undefined" ? "" : window.location.search;
+  // Carry the query (next, or a signed OAuth request) over to the other form.
+  const query = search ? `?${search}` : "";
   return (
     <form action={submit} className="space-y-4">
       {mode === "sign-up" && (
