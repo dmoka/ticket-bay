@@ -2,6 +2,8 @@ import { headers } from "next/headers";
 import { getAuth, requireSession, appBaseURL } from "@/lib/auth";
 import { mcpResource } from "@/src/auth/auth";
 import { SectionLabel } from "@/components/app/primitives";
+import { getDb } from "@/src/db/client";
+import { clientNames } from "@/src/db/oauth-clients-repo";
 import { ApiKeysPanel, type KeyRow } from "./api-keys-panel";
 import { ConnectedApps, type AppRow } from "./connected-apps";
 
@@ -20,9 +22,11 @@ export default async function DevelopersPage() {
     lastUsedAt: k.lastRequest ? new Date(k.lastRequest).getTime() : null,
   }));
   const consents = (await auth.api.getOAuthConsents({ headers: h })) as { id: string; clientId: string; scopes: string[] | string; createdAt: Date | string }[];
+  const names = await clientNames(getDb(), consents.map((c) => c.clientId));
   const apps: AppRow[] = consents.map((c) => ({
     id: c.id,
     clientId: c.clientId,
+    name: names.get(c.clientId) ?? null,
     scopes: Array.isArray(c.scopes) ? c.scopes : String(c.scopes).split(" "),
     createdAt: new Date(c.createdAt).getTime(),
   }));

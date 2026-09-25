@@ -1,6 +1,8 @@
 import { AuthCard } from "@/components/auth/auth-card";
 import { ConsentButtons } from "@/components/auth/consent-buttons";
 import { requireSession } from "@/lib/auth";
+import { getDb } from "@/src/db/client";
+import { clientNames } from "@/src/db/oauth-clients-repo";
 
 export const metadata = { title: "Connect an app" };
 
@@ -15,7 +17,7 @@ const SCOPE_TEXT: Record<string, string> = {
 };
 
 /** A CIMD client_id is the URL of the app's metadata document: show its host. */
-function clientLabel(clientId: string): string {
+function clientHost(clientId: string): string {
   try {
     return new URL(clientId).host;
   } catch {
@@ -27,12 +29,15 @@ export default async function ConsentPage({ searchParams }: { searchParams: Prom
   const sp = await searchParams;
   const session = await requireSession("/consent");
   const scopes = (sp.scope ?? "").split(" ").filter(Boolean);
+  const clientId = sp.client_id ?? "";
+  const name = (await clientNames(getDb(), clientId ? [clientId] : [])).get(clientId);
   return (
     <AuthCard
       title="Connect an app"
       description={
         <>
-          <span className="font-mono text-foreground">{clientLabel(sp.client_id ?? "an app")}</span> wants to use your TicketBay
+          <span className="font-medium text-foreground">{name ?? "An app"}</span>
+          {clientId && <span className="font-mono text-[12px]"> ({clientHost(clientId)})</span>} wants to use your TicketBay
           account, <span className="text-foreground">{session.user.email}</span>.
         </>
       }

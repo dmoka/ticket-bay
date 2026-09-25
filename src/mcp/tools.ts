@@ -125,7 +125,15 @@ function orderSummary(order: OrderRow, ev: EventRow, nowMs: number, baseURL: str
         }
       : {
           refund_if_cancelled_now_eur: eur(refund!.netCents),
-          refund_fee_eur: eur(refund!.feeCents),
+          // How the refund is built, so no one has to reverse-engineer it:
+          // tickets part − refund fee = refund; the service fee is never refunded.
+          refund_breakdown: {
+            tickets_paid_eur: eur(order.ticketsCents),
+            service_fee_paid_eur: eur(order.feeCents),
+            refund_fee_eur: eur(refund!.feeCents),
+            refund_eur: eur(refund!.netCents),
+            rule: "refund = tickets paid − refund fee; the service fee is not refundable",
+          },
           refund_window_open: refund!.windowOpen,
         }),
     url: new URL(`/orders/${order.id}`, baseURL).toString(),
