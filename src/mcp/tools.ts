@@ -15,7 +15,7 @@ import { listOrdersByUser, toDomainOrder } from "../db/orders-repo";
 import type { EventRow, OrderRow } from "../db/schema";
 import { seatsAvailable } from "../domain/booking";
 import { previewCancellation } from "../domain/cancellation";
-import { EARLY_BIRD_PERCENT, earlyBirdApplies, earlyBirdEndsMs } from "../domain/invoice";
+import { buildInvoice, EARLY_BIRD_PERCENT, earlyBirdApplies, earlyBirdEndsMs } from "../domain/invoice";
 import { priceTiers } from "../domain/pricing";
 import type { PaymentProvider } from "../payments";
 import { cancelOwnOrder, OrderError, placeOrder, quoteOrder } from "../services/orders";
@@ -86,10 +86,12 @@ async function run(fn: () => Promise<CallToolResult>): Promise<CallToolResult> {
   }
 }
 
-/** The price one ticket costs if bought right now: early-bird included, fee not. */
+/**
+ * What one ticket costs if bought right now, early-bird included, fee not —
+ * from the invoice module itself, so the listed price is the charged price.
+ */
 function currentTicketCents(ev: EventRow, nowMs: number): number {
-  const eb = earlyBirdApplies({ startMs: ev.startsAtMs }, nowMs) ? EARLY_BIRD_PERCENT : 0;
-  return Math.round((ev.priceCents * (100 - eb)) / 100);
+  return buildInvoice(toDomainEvent(ev), 1, nowMs).ticketsCents;
 }
 
 function eventSummary(ev: EventRow, nowMs: number) {
@@ -127,13 +129,20 @@ function orderSummary(order: OrderRow, ev: EventRow, nowMs: number, baseURL: str
           refund_if_cancelled_now_eur: eur(refund!.netCents),
           // How the refund is built, so no one has to reverse-engineer it:
           // tickets part − refund fee = refund; the service fee is never refunded.
-          refund_breakdown: {
-            tickets_paid_eur: eur(order.ticketsCents),
-            service_fee_paid_eur: eur(order.feeCents),
-            refund_fee_eur: eur(refund!.feeCents),
-            refund_eur: eur(refund!.netCents),
-            rule: "refund = tickets paid − refund fee; the service fee is not refundable",
-          },
+          refund_breakdown: refund!.windowOpen
+            ? {
+                tickets_paid_eur: eur(order.ticketsCents),
+                service_fee_paid_eur: eur(order.feeCents),
+                refund_fee_eur: eur(refund!.feeCents),
+                refund_eur: eur(refund!.netCents),
+                rule: "refund = tickets paid − refund fee; the service fee is not refundable",
+              }
+            : {
+                tickets_paid_eur: eur(order.ticketsCents),
+                service_fee_paid_eur: eur(order.feeCents),
+                refund_eur: 0,
+                rule: "the event has started: nothing is refunded and the seats stay with the customer",
+              },
           refund_window_open: refund!.windowOpen,
         }),
     url: new URL(`/orders/${order.id}`, baseURL).toString(),
@@ -266,7 +275,7 @@ export function createTicketBayServer(deps: ToolDeps, caller: Caller, opts: { in
           line_items: [
             { label: `${quantity} × ticket`, eur: eur(inv.subtotalCents) },
             ...(inv.discountPercent
-              ? [{ label: `Discount ${inv.discountPercent}% (${discountParts(inv.groupPercent, inv.earlyBirdPercent, code)})`, eur: -eur(inv.discountCents) }]
+              ? [{ label: `Discount ${inv.discountPercent}% (${discountParts(inv.groupPercent, inv.earlyBirdPercent, code)}${inv.groupPercent + inv.earlyBirdPercent + inv.codePercent > inv.discountPercent ? `, capped at ${inv.discountPercent}%` : ""})`, eur: -eur(inv.discountCents) }]
               : []),
             { label: "Tickets", eur: eur(inv.ticketsCents) },
             { label: "Service fee (3%)", eur: eur(inv.feeCents) },
@@ -297,7 +306,8 @@ export function createTicketBayServer(deps: ToolDeps, caller: Caller, opts: { in
       description:
         "Book and PAY for tickets as the signed-in customer: charges their card on file and returns the order. " +
         "Call quote_price first, show the customer the total, and only book after they say yes. " +
-        "Pass the same idempotency_key when retrying after a timeout, so the customer is never charged twice. Requires an API key.",
+        "Pass the same idempotency_key only to retry after a timeout or lost reply (you get the same order back, never a second charge); " +
+        "after a booking error, use a NEW key. Requires an API key.",
       inputSchema: z.object({
         event_id: z.string(),
         quantity: z.number().int().min(1).max(50),
@@ -401,6 +411,7 @@ export function createTicketBayServer(deps: ToolDeps, caller: Caller, opts: { in
       const ev = await getEvent(db, event_id);
       if (!ev) return fail(`No event with id "${event_id}".`);
       if (ev.cancelledAtMs !== null) return fail(`${ev.name} is already cancelled.`);
+      if (ev.startsAtMs <= now()) return fail(`${ev.name} has already started — a past event cannot be cancelled.`);
       const impact = await cancelImpact(db, ev.id);
       const url = new URL("/admin/events", baseURL);
       url.searchParams.set("cancel", ev.id);

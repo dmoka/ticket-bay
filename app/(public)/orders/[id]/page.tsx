@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { CheckCircle2 } from "lucide-react";
 import { getDb } from "@/src/db/client";
-import { getOrderWithEvent, toDomainOrder } from "@/src/db/orders-repo";
+import { getOrderWithEvent, isOrderId, toDomainOrder } from "@/src/db/orders-repo";
 import { previewCancellation } from "@/src/domain/cancellation";
 import { now } from "@/lib/clock";
 import { requireSession } from "@/lib/auth";
@@ -25,7 +25,7 @@ export default async function OrderPage({
   const id = Number((await params).id);
   const { placed } = await searchParams;
   const session = await requireSession(`/orders/${(await params).id}`);
-  const found = Number.isSafeInteger(id) ? await getOrderWithEvent(getDb(), id) : undefined;
+  const found = isOrderId(id) ? await getOrderWithEvent(getDb(), id) : undefined;
   // Someone else's order is simply not found: an order number leaks nothing.
   if (!found || found.order.userId !== session.user.id) notFound();
   const { order, event: ev } = found;

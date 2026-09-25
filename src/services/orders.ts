@@ -11,7 +11,10 @@ import { adjustSeatsSold, getEvent, getEventForUpdate, markEventCancelled, toDom
 import {
   getOrder,
   getOrderByIdempotencyKey,
+  isOrderId,
+  listCancelRefunds,
   listPaidOrdersForUpdate,
+  listUnpaidCancelRefunds,
   getOrderWithEvent,
   insertOrder,
   markRefunded,
@@ -115,6 +118,12 @@ export async function placeOrder(deps: Deps, input: PlaceOrderInput): Promise<{ 
     idempotencyKey: input.idempotencyKey,
     description: `${input.quantity} x ${ev.name}`,
   });
+  // Same key, same amount: the provider hands back the ORIGINAL charge. If an
+  // earlier attempt with this key failed, that charge was voided — an order on
+  // it would be tickets for free. A new attempt needs a new key.
+  if (charge.refundedCents > 0) {
+    throw new OrderError("An earlier attempt with this checkout failed and was refunded. Start a new checkout (a new idempotency key).");
+  }
 
   try {
     const order = await db.transaction(async (tx) => {
@@ -160,6 +169,14 @@ export async function placeOrder(deps: Deps, input: PlaceOrderInput): Promise<{ 
     });
     return { order, replayed: false };
   } catch (e) {
+    // Two submits with the same key at once: both got the same charge, one
+    // inserted the order, this one lost on the unique key. The charge belongs
+    // to the winner's order — voiding it would refund tickets that exist.
+    const winner = await getOrderByIdempotencyKey(db, input.idempotencyKey);
+    if (winner && winner.paymentId === charge.id) {
+      if (winner.userId !== (input.userId ?? null)) throw new OrderError("This checkout was already used. Start a new one.");
+      return { order: winner, replayed: true };
+    }
     // The card was charged but no order exists: give the money back.
     await payments.refund(charge.id, charge.amountCents, `void-${input.idempotencyKey}`);
     throw e;
@@ -215,7 +232,7 @@ export async function cancelOrder(deps: Deps, orderId: number): Promise<CancelRe
  * found" — never "not yours" — so an order number leaks nothing.
  */
 export async function cancelOwnOrder(deps: Deps, userId: string, orderId: number): Promise<CancelResult> {
-  const found = Number.isSafeInteger(orderId) ? await getOrder(deps.db, orderId) : undefined;
+  const found = isOrderId(orderId) ? await getOrder(deps.db, orderId) : undefined;
   if (!found || found.userId !== userId) throw new OrderError("Order not found.");
   return cancelOrder(deps, orderId);
 }
@@ -228,39 +245,57 @@ export interface CancelEventResult {
 
 /**
  * The organiser calls the event off: sales stop and every paid order gets its
- * whole ticket amount back — no refund fee, no time window, because the
- * customer did nothing wrong. (The service fee stays with the platform, as it
- * does for every refund; the schema caps a refund at the ticket amount.)
+ * whole ticket amount back — no refund fee, because the customer did nothing
+ * wrong. (The service fee stays with the platform, as it does for every
+ * refund; the schema caps a refund at the ticket amount.) Only before the
+ * event starts: a show that happened is not refunded wholesale.
  * Admin-only — callers check the role.
+ *
+ * Money moves in two phases. The transaction marks every order refunded and
+ * the event cancelled; then each payout goes to the provider. A payout that
+ * fails leaves its order refunded-but-unpaid (no refund id) — calling
+ * cancelEvent again on the cancelled event retries exactly those, and the
+ * per-order idempotency key means nobody is paid twice.
  */
 export async function cancelEvent(deps: Deps, eventId: string): Promise<CancelEventResult> {
-  const { db, payments, nowMs } = deps;
-  const refunds = await db.transaction(async (tx) => {
+  const { db, nowMs } = deps;
+  await db.transaction(async (tx) => {
     // Event lock first: no checkout can add a paid order behind our back. A
     // customer refunding at the same moment locks order-then-event; Postgres
     // detects that deadlock and aborts one side, which the caller can retry.
     const ev = await getEventForUpdate(tx, eventId);
     if (!ev) throw new OrderError("Event not found.");
-    if (ev.cancelledAtMs !== null) throw new OrderError("This event is already cancelled.");
+    if (ev.cancelledAtMs !== null) {
+      if ((await listUnpaidCancelRefunds(tx, eventId, ev.cancelledAtMs)).length === 0) throw new OrderError("This event is already cancelled.");
+      return; // cancelled earlier, some payouts still owed: retry them below
+    }
+    if (nowMs >= ev.startsAtMs) throw new OrderError("This event has already started — it can no longer be cancelled.");
     await markEventCancelled(tx, eventId, nowMs);
-    const paid = await listPaidOrdersForUpdate(tx, eventId);
-    for (const o of paid) {
+    for (const o of await listPaidOrdersForUpdate(tx, eventId)) {
       const won = await markRefunded(tx, o.id, { atMs: nowMs, refundCents: o.ticketsCents, refundFeeCents: 0, seatsReleased: true });
       if (!won) throw new OrderError(`Order ${o.id} changed while cancelling. Try again.`);
       await adjustSeatsSold(tx, eventId, -o.quantity);
     }
-    return paid.map((o) => ({ id: o.id, paymentId: o.paymentId, cents: o.ticketsCents }));
   });
+  return payCancelRefunds(deps, eventId);
+}
 
-  for (const r of refunds) {
-    if (r.cents > 0) {
-      const refund = await payments.refund(r.paymentId, r.cents, `event-cancel-${r.id}`);
-      await setRefundId(db, r.id, refund.id);
+/** Pay every refund the cancellation owes and has not paid yet. */
+async function payCancelRefunds({ db, payments }: Deps, eventId: string): Promise<CancelEventResult> {
+  const ev = (await getEvent(db, eventId))!;
+  const owed = await listUnpaidCancelRefunds(db, eventId, ev.cancelledAtMs!);
+  let failed = 0;
+  for (const o of owed) {
+    try {
+      const refund = await payments.refund(o.paymentId, o.refundCents!, `event-cancel-${o.id}`);
+      await setRefundId(db, o.id, refund.id);
+    } catch {
+      failed++;
     }
   }
-  return {
-    event: (await getEvent(db, eventId))!,
-    refundedOrders: refunds.length,
-    refundedCents: refunds.reduce((sum, r) => sum + r.cents, 0),
-  };
+  if (failed > 0) {
+    throw new OrderError(`The event is cancelled, but ${failed} of ${owed.length} refunds failed at the payment provider. Cancel again to retry them.`);
+  }
+  const all = await listCancelRefunds(db, eventId, ev.cancelledAtMs!);
+  return { event: ev, refundedOrders: all.length, refundedCents: all.reduce((sum, o) => sum + (o.refundCents ?? 0), 0) };
 }

@@ -6,6 +6,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { money, num } from "@/lib/format";
+// On success the page re-renders without this dialog (the event is cancelled)
+// and shows the result as a banner; the dialog only ever shows the form.
 import { cancelEventAction, type CancelEventState } from "./actions";
 
 export function CancelEventDialog({
@@ -34,11 +36,7 @@ export function CancelEventDialog({
             {event.when}. {fromAgent && "An AI agent prepared this. Nothing has changed yet — you decide."}
           </DialogDescription>
         </DialogHeader>
-        {state.done ? (
-          <div className="rounded-md border border-emerald-200 bg-emerald-50/70 px-3 py-2 dark:border-emerald-900 dark:bg-emerald-950/30" role="status">
-            Event cancelled. {num(state.done.refundedOrders)} orders refunded, <span className="font-mono">{money(state.done.refundedCents)}</span> in total.
-          </div>
-        ) : (
+        {
           <form action={action} className="space-y-4">
             <input type="hidden" name="eventId" value={event.id} />
             <ul className="space-y-1 rounded-md border border-border bg-muted/40 px-3 py-2">
@@ -72,7 +70,7 @@ export function CancelEventDialog({
               </Button>
             </DialogFooter>
           </form>
-        )}
+        }
       </DialogContent>
     </Dialog>
   );

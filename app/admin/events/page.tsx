@@ -7,6 +7,8 @@ import { CATEGORY_LABEL, eventStatus } from "@/lib/status";
 import { Meter, Mono, PageHeader, StatusBadge, Tag } from "@/components/app/primitives";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { CancelEventDialog } from "./cancel-event-dialog";
+import { RetryRefunds } from "./retry-refunds";
+import { listUnpaidCancelRefunds } from "@/src/db/orders-repo";
 
 export const metadata = { title: "Events" };
 
@@ -18,6 +20,7 @@ export default async function AdminEvents({ searchParams }: { searchParams: Prom
   const toCancel = rows.find((r) => r.event.id === sp.cancel && r.event.cancelledAtMs === null && r.event.startsAtMs > nowMs)?.event;
   const impact = toCancel ? await cancelImpact(getDb(), toCancel.id) : null;
   const justCancelled = rows.find((r) => r.event.id === sp.cancel && r.event.cancelledAtMs !== null);
+  const unpaid = justCancelled ? (await listUnpaidCancelRefunds(getDb(), justCancelled.event.id, justCancelled.event.cancelledAtMs!)).length : 0;
   const capacity = rows.reduce((s, r) => s + r.event.totalSeats, 0);
   const sold = rows.reduce((s, r) => s + r.event.seatsSold, 0);
 
@@ -35,6 +38,7 @@ export default async function AdminEvents({ searchParams }: { searchParams: Prom
         <div role="status" className="mb-4 rounded-md border border-emerald-200 bg-emerald-50/70 px-3 py-2 dark:border-emerald-900 dark:bg-emerald-950/30">
           {justCancelled.event.name} is cancelled. Sales are closed and {num(justCancelled.refunds)} orders are refunded, <Mono>{money(justCancelled.refundedCents)}</Mono> in
           total.
+          {unpaid > 0 && <RetryRefunds eventId={justCancelled.event.id} pending={unpaid} />}
         </div>
       )}
       {toCancel && impact && (

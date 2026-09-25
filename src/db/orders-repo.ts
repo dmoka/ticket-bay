@@ -62,6 +62,25 @@ export async function listPaidOrdersForUpdate(tx: DbLike, eventId: string): Prom
     .for("update");
 }
 
+/** The orders an event cancellation refunded (all marked at the cancel instant). */
+export async function listCancelRefunds(db: DbLike, eventId: string, cancelledAtMs: number): Promise<OrderRow[]> {
+  return db
+    .select()
+    .from(orders)
+    .where(and(eq(orders.eventId, eventId), eq(orders.status, "refunded"), eq(orders.refundedAtMs, cancelledAtMs), eq(orders.refundFeeCents, 0)))
+    .orderBy(orders.id);
+}
+
+/** …of those, the ones whose money has not reached the provider yet. */
+export async function listUnpaidCancelRefunds(db: DbLike, eventId: string, cancelledAtMs: number): Promise<OrderRow[]> {
+  return (await listCancelRefunds(db, eventId, cancelledAtMs)).filter((o) => o.refundId === null && (o.refundCents ?? 0) > 0);
+}
+
+/** Order ids are Postgres INTEGERs: anything else cannot name an order. */
+export function isOrderId(id: number): boolean {
+  return Number.isSafeInteger(id) && id > 0 && id <= 2_147_483_647;
+}
+
 /**
  * The refund module's view of a stored order: what was paid for the tickets
  * (the service fee is not refundable) and when the event starts.
