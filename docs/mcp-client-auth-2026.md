@@ -10,8 +10,8 @@ Researched 2026-09-25 for TicketBay's MCP server (module 6). Two kinds of eviden
 ## The short answer
 
 > **2026-09-25, course decision:** TicketBay uses per-user API keys only; the MCP OAuth flow
-> (Better Auth MCP plugin + CIMD) was built, proven below, and then removed from `app/v2-mcp`.
-> It is kept on the local branch `app/v2-mcp-oauth`. The table shows what that means per client.
+> (Better Auth MCP plugin + CIMD) was built, proven below, and then removed from `main`.
+> It is kept on commit `6dbea98` in `main`'s history (`git checkout 6dbea98`). The table shows what that means per client.
 
 | Client | API key header | OAuth "Connect" | Works against `localhost`? | TicketBay today (keys only) |
 |---|---|---|---|---|
@@ -27,7 +27,7 @@ Cursor, VS Code). Chat apps are different: ChatGPT cannot send an API key at all
 Claude.ai / Desktop accept a key header only as a beta for some organisations — so "a chat
 app connects with the user's API key" is not true for most users today. Chat apps connect
 with OAuth ("Connect") from their cloud, to a public HTTPS URL. The OAuth build on
-`app/v2-mcp-oauth` advertised CIMD (`client_id_metadata_document_supported: true`, `none`
+commit `6dbea98` advertised CIMD (`client_id_metadata_document_supported: true`, `none`
 auth method, S256 PKCE) and no DCR endpoint; Claude Code, Claude.ai, ChatGPT and VS Code
 support CIMD, Cursor's docs only describe DCR.
 
@@ -52,7 +52,7 @@ Per-server `tools: include / exclude` filtering is documented in the same guide.
 self-hosted, so the connection comes from wherever Hermes runs — that machine must reach
 TicketBay's URL (localhost only if both run on the same machine).
 
-## Verified live (2026-09-25, on the OAuth build — branch `app/v2-mcp-oauth`)
+## Verified live (2026-09-25, on the OAuth build — commit `6dbea98`)
 
 - Claude Code's OAuth request carried `client_id=https://claude.ai/oauth/claude-code-client-metadata`
   (a CIMD URL), `code_challenge_method=S256`, `resource=http://localhost:3100/api/mcp` and the

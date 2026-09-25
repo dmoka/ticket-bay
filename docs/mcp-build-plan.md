@@ -65,8 +65,8 @@ Decisions come from the grilling on 2026-09-25 (see "Decisions") and from
 ## Scope change (2026-09-25, evening)
 
 Course decision: agents connect with the customer's API key, so step 6 (MCP OAuth via the
-Better Auth MCP plugin + CIMD) is dropped from `app/v2-mcp`. It was already built and proven
-(Claude Code, CIMD, localhost) — that work is kept on the local branch `app/v2-mcp-oauth`
+Better Auth MCP plugin + CIMD) is dropped from `main`. It was already built and proven
+(Claude Code, CIMD, localhost) — that work is kept on commit `6dbea98` in `main`'s history (`git checkout 6dbea98`)
 and in `docs/mcp-e2e/oauth/`. Also: one demo customer; `cancel_event` links to the event's
 own cancel page; `search_docs` over `help/`; key scopes (Read only / Read & write).
 Caveat recorded in `docs/mcp-client-auth-2026.md`: ChatGPT cannot send API keys, and
