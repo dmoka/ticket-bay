@@ -113,7 +113,10 @@ describe("ADVERSARIAL round 3: the advisory lock is released and scoped per key"
     const held = await Promise.all([t.db.$client.connect(), t.db.$client.connect()]);
     held.forEach((c) => c.release());
     await within(placeOrder(deps(payments), { ...input, idempotencyKey: "boom-key" }), 2_000, "retry after a thrown charge");
-    const locks = await t.db.execute(sql`SELECT count(*)::int AS n FROM pg_locks WHERE locktype = 'advisory'`);
+    // Only this file's database: other test files run in parallel and hold their own short advisory locks.
+    const locks = await t.db.execute(
+      sql`SELECT count(*)::int AS n FROM pg_locks l JOIN pg_stat_activity a ON a.pid = l.pid WHERE l.locktype = 'advisory' AND a.datname = current_database()`,
+    );
     expect((locks.rows[0] as { n: number }).n).toBe(0);
   });
 
