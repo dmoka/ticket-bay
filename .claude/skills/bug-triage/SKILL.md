@@ -38,7 +38,9 @@ prove it with a failing test, fix it, and hand a human a pull request to review.
    an existing test file: a fix that needs a changed test is not a fix.
 4. **If you cannot reproduce it**, do not change any source. Report "could not
    reproduce", what you tried, and what information would help.
-5. **Fix the source** with the smallest change that makes the new test pass.
+5. **Fix the source** with the smallest change that makes the new test pass. Change
+   only what the report is about. If you notice other problems, list them in the PR under
+   "Also noticed" — do not fix them in this PR (each fix gets its own report and review).
 6. **Run `npm run test:unit`.** Everything must be green. If an existing test breaks,
    your fix is wrong: change the fix, never the test.
 7. **Commit on a new branch** and open a **pull request** against the base branch you
