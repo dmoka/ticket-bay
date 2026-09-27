@@ -21,10 +21,9 @@ however high the score.
 A lane that could not run (no Docker, browsers missing, a red baseline that makes
 Stryker refuse) reports **BLOCKED**, never green. Blocked is not a pass.
 
-## The two rules (non-negotiable)
+## The rule (non-negotiable)
 
-1. **The coder never touches the tests.** When agents are graded by tests and can edit those tests, they will eventually edit the test instead of fixing the bug. The exam paper stays locked away from the student. Test changes come only from the tester subagents or a human.
-2. **Testers write tests, never source — and start with fresh context.** They may add or heal tests in their own lane, but the source code is read-only for them. And they never see the coder's reasoning — only the code. A critic that shares the author's context inherits the author's blind spots. Five critics only help if they're five independent pairs of eyes.
+**Testers write tests, never source — and start with fresh context.** They may add or heal tests in their own lane, but the source code is read-only for them. And they never see the coder's reasoning — only the code. A critic that shares the author's context inherits the author's blind spots. Five critics only help if they're five independent pairs of eyes.
 
 ## Commands
 

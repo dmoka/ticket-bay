@@ -35,7 +35,7 @@ prove it with a failing test, fix it, and hand a human a pull request to review.
    `tests/lib/regression-<short-slug>.test.ts` for `lib/` (unit level, no Docker; the
    existing unit config already runs both folders). Run
    `npm run test:unit` and confirm this test fails for the reported reason. Never edit
-   an existing test file (repo rule: the coder never touches the tests it is graded by).
+   an existing test file: a fix that needs a changed test is not a fix.
 4. **If you cannot reproduce it**, do not change any source. Report "could not
    reproduce", what you tried, and what information would help.
 5. **Fix the source** with the smallest change that makes the new test pass.

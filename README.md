@@ -85,7 +85,7 @@ This repo is also wired with a **team of five AI tester agents** for [Claude Cod
 | [`ui-tester`](.claude/agents/ui-tester.md) | Playwright flows on the money paths | Assert what the user sees, never that the page loaded |
 | [`adversarial-tester`](.claude/agents/adversarial-tester.md) | Reads the code hunting shortcuts, reads the tests hunting what they avoid, writes the tests that break green suites | It succeeds when green turns red |
 
-The five run as **Claude Code subagents** in a multi-critic loop — one coder, five critics, max 3 rounds, coder never touches the tests. Loop rules in [`CLAUDE.md`](CLAUDE.md).
+The five run as **Claude Code subagents** in a multi-critic loop — one coder, five critics, max 3 rounds. Loop rules in [`AGENTS.md`](AGENTS.md).
 
 ## See it catch a real bug
 
