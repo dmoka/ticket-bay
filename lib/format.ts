@@ -1,3 +1,4 @@
+// Display helpers: money and order numbers as customers see them.
 // Display formatting. Money arrives as integer cents and is only ever divided
 // here, at the edge, for display.
 
