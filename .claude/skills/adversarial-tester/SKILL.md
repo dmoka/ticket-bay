@@ -1,6 +1,6 @@
 ---
 name: adversarial-tester
-description: Break code the other tests passed, in a fresh agent. Use on any green suite before trusting it — especially AI-written code with AI-written tests. Works in any harness: the brief runs in a separate agent with its own context.
+description: "Attack a PR or green suite in a fresh agent to break it. Use when asked to 'attack this PR', or on a green test suite before trusting it, especially AI-written code with AI-written tests. Hands the brief in .claude/agents/adversarial-tester.md to a separate agent with its own context, so it does not share the author's blind spots. Works in any harness (Claude Code subagent, Hermes delegate_task). Succeeds only by making green tests fail; reports findings, fixes nothing."
 ---
 
 # Adversarial tester
