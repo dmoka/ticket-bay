@@ -34,3 +34,12 @@ Stryker refuse) reports **BLOCKED**, never green. Blocked is not a pass.
   only the integration lane covers. Needs Docker, runs at concurrency 1 on purpose.
 - `npm run test:integration` — integration tests (Testcontainers Postgres; requires Docker)
 - `npm run test:ui` — Playwright flows (critical money paths only; Testcontainers Postgres)
+
+## Fixing a reported bug
+
+The bug-triage skill (github.com/dmoka/skills) reads this section.
+
+- **Where the code lives:** business rules in `src/domain` (money, refunds, booking, pricing), use cases in `src/services`, database access in `src/db`, small helpers in `lib/`, the UI in `app/`.
+- **Where a regression test goes:** a new file `tests/domain/regression-<short-slug>.test.ts` for code in `src/domain`, or `tests/lib/regression-<short-slug>.test.ts` for code in `lib/`. The unit test config already runs both folders; do not edit it.
+- **The fast test suite:** `npm ci`, then `npm run test:unit` (no Docker needed).
+- **Imports:** tests may import app code with the `@/` alias (it is set up for the unit tests).
