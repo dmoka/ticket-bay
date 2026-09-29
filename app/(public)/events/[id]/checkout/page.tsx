@@ -1,3 +1,4 @@
+import Form from "next/form";
 import Link from "next/link";
 import { randomUUID } from "node:crypto";
 import { notFound } from "next/navigation";
@@ -86,7 +87,9 @@ export default async function CheckoutPage({
               <div className="mt-1 text-[13px] text-muted-foreground">
                 {date(ev.startsAtMs)} · <span className="font-mono tabular-nums">{time(ev.startsAtMs)}</span> · {ev.venue}
               </div>
-              <form method="get" className="mt-4 flex items-end gap-2">
+              {/* next/form: a GET form that navigates on the client, so the details the customer
+                  already typed survive "Update" and "Apply" (a full reload wiped them). */}
+              <Form action={`/events/${ev.id}/checkout`} scroll={false} className="mt-4 flex items-end gap-2">
                 {appliedCode && <input type="hidden" name="code" value={appliedCode} />}
                 <div className="flex-1">
                   <label htmlFor="qty" className="mb-1.5 block text-[13px] font-medium">
@@ -97,7 +100,7 @@ export default async function CheckoutPage({
                 <Button type="submit" variant="outline">
                   Update
                 </Button>
-              </form>
+              </Form>
             </div>
 
             <div className="p-5">
@@ -120,7 +123,7 @@ export default async function CheckoutPage({
             </div>
 
             <div className="p-5">
-              <form method="get" className="flex items-end gap-2">
+              <Form action={`/events/${ev.id}/checkout`} scroll={false} className="flex items-end gap-2">
                 <input type="hidden" name="qty" value={Number.isFinite(qty) ? qty : 1} />
                 <div className="flex-1">
                   <label htmlFor="code" className="mb-1.5 block text-[13px] font-medium">
@@ -131,7 +134,7 @@ export default async function CheckoutPage({
                 <Button type="submit" variant="outline">
                   Apply
                 </Button>
-              </form>
+              </Form>
               {codeError && <p className="mt-2 text-[13px] text-red-600 dark:text-red-400">{codeError}</p>}
               {result?.code && (
                 <p className="mt-2 text-[13px] text-emerald-700 dark:text-emerald-400">
