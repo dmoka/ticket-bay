@@ -14,6 +14,8 @@ Needs Node 22 and a running Docker.
 npm install && npm run db:up && npm run db:migrate && npm run db:seed && npm run dev
 ```
 
+**Working with an agent?** Run it inside the sandbox: `./box` starts a dev container that sees only this repo and a short network allowlist, then opens Claude Code in it (details in [`.devcontainer/README.md`](.devcontainer/README.md)).
+
 Then open http://localhost:3000 (storefront) and http://localhost:3000/admin (dashboard). The seed creates 8 events, ~300 orders over the last 60 days and two accounts, both with the password `ticketbay-demo`:
 
 | Account | Role | What it has |
