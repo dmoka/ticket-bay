@@ -1,0 +1,18 @@
+# Secret scan config for the gate. Default gitleaks rules, plus the few values
+# that look like secrets but are fake on purpose. Keep this list short: every
+# entry needs a reason, and a real key never goes here — rotate it instead.
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Fake payment keys. The provider in src/payments is local and refuses sk_live_ keys."
+regexes = ['''^sk_test_[A-Za-z0-9_]*$''']
+
+[[allowlists]]
+description = "Test fixture secrets, named so nobody mistakes them for real ones."
+regexes = ['''^(integration|adversarial)-secret-''']
+
+[[allowlists]]
+description = "Idempotency keys in recorded MCP sessions are request IDs, not credentials."
+regexTarget = "match"
+regexes = ['''idempotency_key''']
