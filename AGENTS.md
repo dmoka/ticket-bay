@@ -9,6 +9,7 @@ This repo runs a **multi-critic loop**: one coding agent writes code, five indep
 3. All five green → done, ship it.
 4. Any failure → collect every finding into one report, hand it back to the coder, fix, go again.
 5. **Maximum 3 rounds.** Not converging by round 3 → stop and escalate to a human.
+6. **Only this change blocks.** Testers judge the lines this change added or changed and the behavior it changed. A bug that was already there goes in the report as "found, not caused by this change" and becomes new work — it never blocks, and it never starts another round.
 
 ### What "green" means per lane
 
