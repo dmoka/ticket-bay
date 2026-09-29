@@ -1,5 +1,7 @@
 # TicketBay
 
+[![gate](https://github.com/dmoka/ticket-bay/actions/workflows/gate.yml/badge.svg)](https://github.com/dmoka/ticket-bay/actions/workflows/gate.yml)
+
 The reference app for the **AI Agent Engineer** course: a small but real ticketing platform — storefront, checkout, order management and an ops dashboard — built so that AI coding agents have something worth breaking.
 
 - **Stack:** Next.js (App Router, server actions), TypeScript, Postgres 17 via Drizzle ORM + node-postgres (`pg`), shadcn/ui, Recharts. Docker runs the database locally (docker-compose) and in tests (Testcontainers).

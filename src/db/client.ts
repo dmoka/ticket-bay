@@ -14,7 +14,13 @@ const MIGRATIONS_FOLDER = path.join(process.cwd(), "drizzle");
 
 /** A connection pool over one Postgres database. Close it with `closeDb`. */
 export function openDb(url: string): Db {
-  return drizzle(new Pool({ connectionString: url }), { schema });
+  const pool = new Pool({ connectionString: url });
+  // node-postgres: an idle pooled client whose connection drops (a database
+  // restart, a test container stopping) emits "error" on the pool, and an
+  // unhandled "error" event crashes the process. The pool already discards
+  // that client and opens a fresh one on the next query; we only log it.
+  pool.on("error", (err) => console.error("[db] idle connection lost:", err.message));
+  return drizzle(pool, { schema });
 }
 
 export async function closeDb(db: Db): Promise<void> {
