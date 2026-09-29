@@ -1,4 +1,5 @@
 # The gate: nothing merges red. One job per lane so a failure says which lane.
+# The secret scan runs first in the list and blocks like any test.
 # Unit + property tests also run inside the sandbox box (./box); integration and
 # UI tests need Docker, so they run here, on every push to main/loop-test and
 # on every pull request.
@@ -17,6 +18,26 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  secrets:
+    name: secret scan (gitleaks)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      GITLEAKS_VERSION: 8.30.1
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Install gitleaks
+        run: |
+          base=https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}
+          tar=gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz
+          curl -sSfLO "$base/$tar"
+          curl -sSfL "$base/gitleaks_${GITLEAKS_VERSION}_checksums.txt" | grep " $tar\$" | sha256sum -c -
+          tar -xzf "$tar" gitleaks
+      # Full history, every branch: a key deleted in a later commit is still leaked.
+      - run: ./gitleaks git . --log-opts="--all" --config .gitleaks.toml --redact --no-banner --exit-code 1
+
   unit:
     name: unit + property + typecheck
     runs-on: ubuntu-latest
