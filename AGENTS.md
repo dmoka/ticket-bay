@@ -25,6 +25,11 @@ Stryker refuse) reports **BLOCKED**, never green. Blocked is not a pass.
 
 **Testers write tests, never source — and start with fresh context.** They may add or heal tests in their own lane, but the source code is read-only for them. And they never see the coder's reasoning — only the code. A critic that shares the author's context inherits the author's blind spots. Five critics only help if they're five independent pairs of eyes.
 
+## Writing tests
+
+- **Test behavior through the public API**: the route handlers and the `src/domain` / `src/services` functions the app calls. Never test private helpers, never assert on internal calls, never mock our own modules. A refactor that changes no behavior must not break a test; if it does, the test was testing the implementation.
+- **Never mark a mutant equivalent yourself.** When the CI mutation check finds a survivor, write a test that kills it. If you believe it cannot be killed (the change does not change behavior), stop and ask the human, with the reason. Only after a yes add `// Stryker disable next-line <Mutator>: equivalent — <why>`. In a loop with nobody watching, leave the PR red and put the question in your report.
+
 ## Commands
 
 - `npm test` — run the test suite (unit + Postgres integration; needs Docker)
