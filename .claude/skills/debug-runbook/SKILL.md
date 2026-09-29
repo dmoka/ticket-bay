@@ -17,6 +17,7 @@ What this codebase won't tell you by reading it once. Work the steps in order; e
 6. **Fix the smallest thing** that turns the test green, then `npm run test:unit`. Done when everything is green and the only changes are the fix and the new test.
 
 A finished case, start to end: [examples/sold-out-badge.md](examples/sold-out-badge.md).
+For the fix-and-PR process after the cause is known, the bug-triage skill takes over.
 
 ## Gotchas
 
