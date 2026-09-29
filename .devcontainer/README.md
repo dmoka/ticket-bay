@@ -23,6 +23,8 @@ Prefer an editor? VS Code and Cursor open the same box with "Reopen in Container
 - Anything inside the box can still leak: the repo, and any token you put in. Keep secrets out; use repo-scoped, short-lived tokens.
 - Allowed hosts are a way out too (for example GitHub, if you log `gh` in), and DNS lookups still leave the box.
 - The repo folder is shared with your machine, so the agent's edits land on your disk. Git is the undo button.
-- Integration and UI tests need Docker (Testcontainers), and giving the box the Docker socket would give it your machine. They run in CI on every push; run `npm test` and `npm run test:ui` outside the box if you need them locally.
+- Integration and UI tests need Docker (Testcontainers), and giving the box the Docker socket would give it your machine. They run in the CI gate (.github/workflows/gate.yml) on every pull request and every push to main; run `npm test` and `npm run test:ui` outside the box if you need them locally.
 
 Use it on repos you trust, and watch what the agent does.
+
+Last verified: 2026-09-29 with devcontainers CLI 0.89.0, Docker 28.0.1 and Claude Code 2.1.284
