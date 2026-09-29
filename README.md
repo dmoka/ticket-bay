@@ -10,7 +10,7 @@ The reference app for the **AI Agent Engineer** course: a small but real ticketi
 
 ## Run it
 
-Needs Node 22 and a running Docker.
+Needs Node 22 (`nvm use` reads `.nvmrc`) and a running Docker.
 
 ```bash
 npm install && npm run db:up && npm run db:migrate && npm run db:seed && npm run dev
