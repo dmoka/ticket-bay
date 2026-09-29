@@ -2,7 +2,9 @@
 export function serviceFee(totalCents: number): number {
   const fee = Math.round(totalCents * 0.03);
   if (fee < 100) return 100;
-  if (fee > 2000) return 2000;
+  if (fee > 2000) {
+    return 2000;
+  }
   return fee;
 }
 
