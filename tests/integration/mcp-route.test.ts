@@ -38,7 +38,10 @@ import {
 
 const wiring = vi.hoisted(() => ({ auth: undefined as unknown, db: undefined as unknown, payments: undefined as unknown }));
 vi.mock("@/lib/auth", () => ({ appBaseURL: () => "http://localhost:3000", getAuth: () => wiring.auth }));
-vi.mock("@/src/db/client", () => ({ getDb: () => wiring.db }));
+vi.mock("@/src/db/client", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../src/db/client")>()),
+  getDb: () => wiring.db,
+}));
 vi.mock("@/src/payments", async () => ({ ...(await import("../../src/payments")), getPayments: () => wiring.payments }));
 vi.mock("@/src/mcp/caller", () => import("../../src/mcp/caller"));
 vi.mock("@/src/mcp/tools", () => import("../../src/mcp/tools"));
