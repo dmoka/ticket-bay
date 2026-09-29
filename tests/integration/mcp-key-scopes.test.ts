@@ -28,7 +28,10 @@ vi.mock("@/lib/auth", () => ({
   getAuth: () => wiring.auth,
   getSession: () => wiring.auth.api.getSession({ headers: new Headers(wiring.cookie ? { cookie: wiring.cookie } : {}) }),
 }));
-vi.mock("@/src/db/client", () => ({ getDb: () => wiring.db }));
+vi.mock("@/src/db/client", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../src/db/client")>()),
+  getDb: () => wiring.db,
+}));
 vi.mock("@/src/payments", async () => ({ ...(await import("../../src/payments")), getPayments: () => wiring.payments }));
 vi.mock("@/src/mcp/caller", () => import("../../src/mcp/caller"));
 vi.mock("@/src/mcp/tools", () => import("../../src/mcp/tools"));

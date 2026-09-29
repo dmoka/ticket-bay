@@ -1,5 +1,7 @@
 # TicketBay
 
+[![gate](https://github.com/dmoka/ticket-bay/actions/workflows/gate.yml/badge.svg)](https://github.com/dmoka/ticket-bay/actions/workflows/gate.yml)
+
 The reference app for the **AI Agent Engineer** course: a small but real ticketing platform — storefront, checkout, order management and an ops dashboard — built so that AI coding agents have something worth breaking.
 
 - **Stack:** Next.js (App Router, server actions), TypeScript, Postgres 17 via Drizzle ORM + node-postgres (`pg`), shadcn/ui, Recharts. Docker runs the database locally (docker-compose) and in tests (Testcontainers).
@@ -13,6 +15,8 @@ Needs Node 22 and a running Docker.
 ```bash
 npm install && npm run db:up && npm run db:migrate && npm run db:seed && npm run dev
 ```
+
+**Working with an agent?** Run it inside the sandbox: `./box` starts a dev container that sees only this repo and a short network allowlist, then opens Claude Code in it (details in [`.devcontainer/README.md`](.devcontainer/README.md)).
 
 Then open http://localhost:3000 (storefront) and http://localhost:3000/admin (dashboard). The seed creates 8 events, ~300 orders over the last 60 days and two accounts, both with the password `ticketbay-demo`:
 
