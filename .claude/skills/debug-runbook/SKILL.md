@@ -1,6 +1,6 @@
 ---
 name: debug-runbook
-description: "Debug a TicketBay bug: reproduce it red, then find it. Use when something in TicketBay is broken, wrong or surprising: a price, refund, discount, badge or seat count that looks off, a failing test, an MCP tool error, or a customer report. Knows the order to look in, the usual causes in this codebase, and the traps that look like code bugs but are config or policy."
+description: "TicketBay looks wrong? Find out why before fixing it. Use when something in TicketBay is broken, wrong or surprising and you need the cause: a refund, price, discount, badge or seat count that looks off, a customer asking why, a failing test, or an MCP tool error. Decides bug or policy first, reproduces it red, knows where to look and the usual causes in this codebase, and the traps that look like code bugs but are config. Investigation only; once the cause is known, the bug-triage skill does the fix-and-PR process."
 ---
 
 # TicketBay debug runbook
