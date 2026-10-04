@@ -46,17 +46,19 @@ if ! up_log="$(npx --yes "$CLI" up --workspace-folder "$repo_root" ${config[@]+"
   exit 1
 fi
 
-# The engine VM's own firewall (init-firewall.sh --engine), once per VM boot: with the socket,
-# the box can start containers that skip the box's firewall, so the VM limits them all.
-if [ -n "${profile:-}" ] &&
-  ! colima ssh -p "$profile" -- sudo iptables -C DOCKER-USER -m set --match-set box-egress dst -j RETURN 2>/dev/null; then
+# The engine VM's own firewall (init-firewall.sh --engine), once per VM boot or box IP: with the
+# socket, the box can start containers that skip the box's firewall, so the VM limits them all.
+if [ -n "${profile:-}" ]; then
   app="$(docker ps -q --filter "label=devcontainer.local_folder=$repo_root" --filter "label=devcontainer.config_file=$repo_root/.devcontainer/docker/devcontainer.json")"
-  image="$(docker inspect --format '{{.Config.Image}}' "$app")"
-  if ! fw_log="$(docker run --rm --network host --cap-add NET_ADMIN --cap-add NET_RAW --user root \
-    --entrypoint /usr/local/bin/init-firewall.sh "$image" --engine 2>&1)"; then
-    echo "$fw_log" >&2
-    echo "box: could not set the engine VM's firewall (see the log above)." >&2
-    exit 1
+  box_ip="$(docker inspect --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$app")"
+  if ! colima ssh -p "$profile" -- sudo iptables -C DOCKER-USER -s "$box_ip" -m set --match-set box-egress dst -j RETURN 2>/dev/null; then
+    image="$(docker inspect --format '{{.Config.Image}}' "$app")"
+    if ! fw_log="$(docker run --rm --network host --cap-add NET_ADMIN --cap-add NET_RAW --user root \
+      --entrypoint /usr/local/bin/init-firewall.sh "$image" --engine "$box_ip" 2>&1)"; then
+      echo "$fw_log" >&2
+      echo "box: could not set the engine VM's firewall (see the log above)." >&2
+      exit 1
+    fi
   fi
 fi
 

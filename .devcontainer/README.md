@@ -36,10 +36,17 @@ brew install colima
 
 - `./box --docker` starts the VM when it is not running (about 30 s), refuses any VM that shares more than this repo (`docker/check-engine.sh`), and leaves your default Docker context and `~/.ssh/config` unchanged. Plain `./box` stays on your normal engine, without a socket.
 - The Docker box is a separate box: its own image, `node_modules`, Claude Code sign-in and database, on the VM's disk. Port: the same `BOX_PORT` rule; the VM forwards it to 127.0.0.1 on your machine.
-- The VM has its own firewall (`init-firewall.sh --engine`): every container on it reaches GitHub, npm, Claude's API and the other containers, nothing else (no internet, no ports on your machine). The box's own firewall is no longer the limit here: the socket can open a root shell in the box.
-- Stop it: `colima stop ticketbay-box`. Remove it and its disk: `colima delete ticketbay-box`. Another clone of the repo: `BOX_DOCKER_PROFILE=<name> ./box --docker` (one VM per repo folder).
+- The VM has its own firewall (`init-firewall.sh --engine`). The box keeps its allowlist (GitHub, npm, Claude). Every other container reaches only the other containers: no internet, no npm, no ports on your machine (`host.docker.internal`). Testcontainers needs no more: the engine pulls its images.
+- Stop it: `colima stop ticketbay-box`. Remove it and its disk: `colima delete --data ticketbay-box`. Another clone of the repo: `BOX_DOCKER_PROFILE=<name> ./box --docker` (one VM per repo folder).
 - VS Code and Cursor: "Reopen in Container" offers "TicketBay Sandbox + Docker (Colima)" (`docker/devcontainer.json`). Start the VM with `./box --docker true` and point the editor at the `colima-ticketbay-box` Docker context; on any other engine the box refuses to start. (Checked with the devcontainer CLI, not in an editor.)
 - Linux (not tested): Colima runs there too, in a QEMU VM. Never mount your host's own Docker socket instead: on Linux that socket is root on your machine.
+
+**What `--docker` does not protect**
+- The socket makes the agent root in the VM. It can open a root shell in the box (`docker exec -u 0`) and remove the box's own firewall; the VM's firewall then still limits the box to the allowlist.
+- A container started with `--privileged` or `--network host` skips the VM's firewall: it reaches the internet and the ports on your machine (`host.docker.internal`), and it can remove the VM's firewall.
+- A container that shares the box's network (`--network container:<box>`) has the box's allowlist.
+- What stays out of reach in every case: your files. The VM shares only this repo, so no container sees your home folder, `~/.ssh` or Docker Desktop's socket.
+- Proposed follow-up: a Docker authorization plugin in the VM that refuses privileged containers, host namespaces, extra capabilities, binds outside the repo and host-network builds.
 
 **No claude.ai connectors.** Signing in to Claude in the box would also bring your claude.ai connectors (Gmail, Drive, Calendar, ...) into Claude Code. The box turns them off (`ENABLE_CLAUDEAI_MCP_SERVERS=false` in `devcontainer.json`): the box limits what the agent can reach, and a connector would reach past the firewall.
 
@@ -53,7 +60,7 @@ brew install colima
 - Allowed hosts are a way out too (for example GitHub, if you log `gh` in), and DNS lookups still leave the box.
 - The repo folder is shared with your machine, so the agent's edits land on your disk. Git is the undo button.
 - Plain `./box` has no Docker socket (it would give the box your machine), so Testcontainers cannot run there. The Postgres tests fall back to the box's own database instead: `./box npm run test:http` (or `test:integration`, or `npm test`) creates throwaway databases next to the app's on `db:5432` and drops them at the end. UI tests (Playwright) need Docker: use `./box --docker`, or the CI gate (.github/workflows/gate.yml), which runs them on every pull request and every push to main.
-- `./box --docker`: the socket makes the agent root in the VM. A container started with `--privileged` or `--network host` skips the VM's firewall and reaches the internet and the ports on your machine (`host.docker.internal`). Your files stay out of reach: the VM shares only this repo.
+- `./box --docker` is weaker on the network: see "What `--docker` does not protect" above.
 
 Use it on repos you trust, and watch what the agent does.
 
