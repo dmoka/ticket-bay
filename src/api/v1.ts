@@ -43,8 +43,8 @@ class ApiError extends Error {
 
 // ---- Input ------------------------------------------------------------------
 
-/** Event ids are slugs: "midnight-arcade-neon-tour". */
-const EventId = z.string().regex(/^[a-z0-9][a-z0-9-]{0,99}$/, "must be an event id from GET /api/v1/events");
+/** Any id the client sends; one that names no event is a 404. */
+const EventId = z.string().min(1);
 
 const CartBody = z.object({
   eventId: EventId,
