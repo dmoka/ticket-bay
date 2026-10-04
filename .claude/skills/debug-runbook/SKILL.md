@@ -22,7 +22,7 @@ For the fix-and-PR process after the cause is known, the bug-triage skill takes 
 ## Gotchas
 
 - **A test that fails on import is config, not the bug.** "Cannot find module '@/…'" means the test sits outside the unit folders or the alias is missing: the `@/` alias is exported from `vitest.config.ts` and reused by `vitest.unit.config.ts`, which runs `tests/domain`, `tests/payments` and `tests/lib` only. Put the test there; leave both configs as they are.
-- **Integration and UI tests need Docker.** `tests/integration` and `e2e/` start Postgres with Testcontainers, so inside the `./box` sandbox they fail with a Docker error. Reproduce at unit level first; the heavy tests run in CI.
+- **Integration and UI tests need Docker.** `tests/integration` and `e2e/` start Postgres with Testcontainers. A box started with plain `./box` has no Docker, so there they fail with a Docker error; a box started with `./box --docker` runs them. Reproduce at unit level first; the heavy tests also run in CI.
 - **Refunds are based on `ticketsCents`**, what the tickets cost after discounts — `toDomainOrder` (`src/db/orders-repo.ts`) maps it into `Order.totalCents`. The service fee is never part of a refund.
 - **Time is always passed in.** Domain functions take `nowMs`; the app reads `now()` from `lib/clock.ts`, and Playwright moves time with the `tb-test-now` cookie when `TICKETBAY_TEST_CLOCK=1`. Tests use fixed instants.
 - **The `loop-test` branch carries a planted demo bug** (the sold-out badge) for the course; `main` is clean. Fix bugs against the branch you were given.

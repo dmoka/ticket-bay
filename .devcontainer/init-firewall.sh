@@ -3,9 +3,62 @@
 # Based on Anthropic's reference init-firewall.sh:
 # https://github.com/anthropics/claude-code/blob/main/.devcontainer/init-firewall.sh (MIT)
 # Changes: DNS only to the container's own resolvers, no outbound SSH (git uses HTTPS),
-# Claude sign-in domains added, IPv6 egress dropped, npm registry verified, the box's Postgres allowed.
+# Claude sign-in domains added, IPv6 egress dropped, npm registry verified, the box's Postgres allowed,
+# an --engine mode for the Docker engine VM of `./box --docker`.
+#   init-firewall.sh           the box itself (postStartCommand)
+#   init-firewall.sh --engine  the engine VM: the same allowlist for every container on it
 set -euo pipefail
 IFS=$'\n\t'
+
+# fill_allowlist <ipset>: GitHub's published ranges, Claude Code (API + sign-in) and the npm registry.
+fill_allowlist() {
+  local set="$1" gh_ranges cidr domain ips ip
+  # GitHub (git over HTTPS, gh, api.github.com): the published IP ranges.
+  gh_ranges=$(curl -s https://api.github.com/meta)
+  echo "$gh_ranges" | jq -e '.web and .api and .git' >/dev/null || { echo "ERROR: GitHub meta missing fields"; exit 1; }
+  while read -r cidr; do
+    [[ "$cidr" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}/[0-9]{1,2}$ ]] || { echo "ERROR: bad CIDR $cidr"; exit 1; }
+    ipset add "$set" "$cidr"
+  done < <(echo "$gh_ranges" | jq -r '(.web + .api + .git)[]' | aggregate -q)
+
+  # Claude Code (API + sign-in) and the npm registry. Nothing else.
+  for domain in \
+    "api.anthropic.com" \
+    "claude.ai" \
+    "claude.com" \
+    "platform.claude.com" \
+    "registry.npmjs.org"; do
+    ips=$(dig +noall +answer A "$domain" | awk '$4 == "A" {print $5}')
+    [ -n "$ips" ] || { echo "ERROR: failed to resolve $domain"; exit 1; }
+    while read -r ip; do
+      [[ "$ip" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]] || { echo "ERROR: bad IP $ip"; exit 1; }
+      ipset add "$set" "$ip" 2>/dev/null || true
+    done < <(echo "$ips")
+  done
+}
+
+# --engine: run by `./box --docker` in a host-network container on the Colima VM, so these rules
+# land in the VM. A container started through the box's Docker socket skips the box's own
+# firewall (and can remove it: the socket can exec into the box as root), so the VM limits every
+# container: Docker sends all container traffic through the DOCKER-USER chain. Containers reach
+# each other and the allowlist; nothing else leaves the VM (no internet, no ports on your machine).
+if [ "${1:-}" = "--engine" ]; then
+  EXT_IF=$(ip route | awk '/default/ {print $5; exit}')
+  [ -n "$EXT_IF" ] || { echo "ERROR: no default route in the VM"; exit 1; }
+  ipset create box-egress hash:net -exist
+  ipset create box-egress-next hash:net -exist
+  ipset flush box-egress-next
+  fill_allowlist box-egress-next
+  ipset swap box-egress-next box-egress
+  ipset destroy box-egress-next
+  iptables -F DOCKER-USER
+  iptables -A DOCKER-USER -m conntrack --ctstate ESTABLISHED,RELATED -j RETURN
+  iptables -A DOCKER-USER ! -o "$EXT_IF" -j RETURN
+  iptables -A DOCKER-USER -m set --match-set box-egress dst -j RETURN
+  iptables -A DOCKER-USER -j REJECT --reject-with icmp-admin-prohibited
+  echo "Engine firewall OK: containers on this VM reach GitHub, npm, Claude and each other, nothing else."
+  exit 0
+fi
 
 # Keep Docker's internal DNS rules before flushing.
 DOCKER_DNS_RULES=$(iptables-save -t nat | grep "127\.0\.0\.11" || true)
@@ -33,29 +86,7 @@ iptables -A INPUT -i lo -j ACCEPT
 iptables -A OUTPUT -o lo -j ACCEPT
 
 ipset create allowed-domains hash:net
-
-# GitHub (git over HTTPS, gh, api.github.com): the published IP ranges.
-gh_ranges=$(curl -s https://api.github.com/meta)
-echo "$gh_ranges" | jq -e '.web and .api and .git' >/dev/null || { echo "ERROR: GitHub meta missing fields"; exit 1; }
-while read -r cidr; do
-  [[ "$cidr" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}/[0-9]{1,2}$ ]] || { echo "ERROR: bad CIDR $cidr"; exit 1; }
-  ipset add allowed-domains "$cidr"
-done < <(echo "$gh_ranges" | jq -r '(.web + .api + .git)[]' | aggregate -q)
-
-# Claude Code (API + sign-in) and the npm registry. Nothing else.
-for domain in \
-  "api.anthropic.com" \
-  "claude.ai" \
-  "claude.com" \
-  "platform.claude.com" \
-  "registry.npmjs.org"; do
-  ips=$(dig +noall +answer A "$domain" | awk '$4 == "A" {print $5}')
-  [ -n "$ips" ] || { echo "ERROR: failed to resolve $domain"; exit 1; }
-  while read -r ip; do
-    [[ "$ip" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]] || { echo "ERROR: bad IP $ip"; exit 1; }
-    ipset add allowed-domains "$ip" 2>/dev/null || true
-  done < <(echo "$ips")
-done
+fill_allowlist allowed-domains
 
 # The Docker host network (the editor talks to the container through it).
 HOST_IP=$(ip route | awk '/default/ {print $3; exit}')
