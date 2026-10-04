@@ -163,7 +163,9 @@ export const error = (status: number, message: string, headers: Record<string, s
 function logFailure(request: Request, e: unknown) {
   const cause = (e as { cause?: unknown })?.cause ?? e;
   const why = cause instanceof Error ? `${cause.name}: ${cause.message}` : String(cause);
-  console.error(`[api/v1] 500 ${request.method} ${new URL(request.url).pathname}: ${why.replace(/\s+/g, " ")}`);
+  const path = new URL(request.url).pathname;
+  const shown = path.length > 80 ? `${path.slice(0, 80)}…` : path;
+  console.error(`[api/v1] 500 ${request.method} ${shown}: ${why.replace(/\s+/g, " ")}`);
 }
 
 /** Runs a handler and turns every refusal into its 4xx; anything else is a logged 500. */
