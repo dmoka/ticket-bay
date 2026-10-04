@@ -3,7 +3,7 @@
 # Based on Anthropic's reference init-firewall.sh:
 # https://github.com/anthropics/claude-code/blob/main/.devcontainer/init-firewall.sh (MIT)
 # Changes: DNS only to the container's own resolvers, no outbound SSH (git uses HTTPS),
-# Claude sign-in domains added, IPv6 egress dropped, npm registry verified, the box's Postgres and Playwright browser downloads allowed.
+# Claude sign-in domains added, IPv6 egress dropped, npm registry verified, the box's Postgres allowed.
 set -euo pipefail
 IFS=$'\n\t'
 
@@ -42,17 +42,13 @@ while read -r cidr; do
   ipset add allowed-domains "$cidr"
 done < <(echo "$gh_ranges" | jq -r '(.web + .api + .git)[]' | aggregate -q)
 
-# Claude Code (API + sign-in), the npm registry, and Playwright's browser downloads
-# (cdn.playwright.dev redirects to storage.googleapis.com; the Microsoft host is its fallback).
+# Claude Code (API + sign-in) and the npm registry. Nothing else.
 for domain in \
   "api.anthropic.com" \
   "claude.ai" \
   "claude.com" \
   "platform.claude.com" \
-  "registry.npmjs.org" \
-  "cdn.playwright.dev" \
-  "storage.googleapis.com" \
-  "playwright.download.prss.microsoft.com"; do
+  "registry.npmjs.org"; do
   ips=$(dig +noall +answer A "$domain" | awk '$4 == "A" {print $5}')
   [ -n "$ips" ] || { echo "ERROR: failed to resolve $domain"; exit 1; }
   while read -r ip; do
