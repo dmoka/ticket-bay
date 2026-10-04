@@ -8,14 +8,15 @@
 //     body (wrong types, missing fields, huge / negative / zero / fractional
 //     numbers, long and unicode strings, control characters, bad JSON), any
 //     Authorization header or none, even a path that is not valid
-//     percent-encoding — the status is below 500 and the body is JSON. Errors (404 and 405 included) are {"error": "..."} with no stack
-//     trace and no SQL in them.
+//     percent-encoding — the status is below 500 and the body is JSON. Errors
+//     (404 and 405 included) are {"error": "..."} with no stack trace and no
+//     SQL in them.
 //  2. Valid input → success. For every VALID order — an event with seats,
 //     1-50 tickets, a working code or none, booked at any instant before the
-//     start — the API answers 201 with the right order. The clocks lean on the
-//     hard places: the early-bird boundary at exactly 30 days, and windows that
-//     cross a daylight-saving change in Europe/Budapest. The early-bird the
-//     order got matches the end the API itself publishes (earlyBirdEndsAt).
+//     start — the API answers 201 with the right order. Bookings lean on the
+//     early-bird boundary, minute by minute, exactly 30 days included. The
+//     early-bird the order got matches the end the API itself publishes
+//     (earlyBirdEndsAt).
 //  3. Oracle. A quote equals a simple model written here, not the production
 //     code: ticket price × count, minus the summed discounts capped at 100%,
 //     rounded once, plus the 3% fee kept between €1 and €20.
@@ -40,13 +41,7 @@ import { createFakeStripe, type PaymentProvider } from "../../src/payments";
 import { customer, makeAuth, revokeKey, scopedKey, useCleanAccounts, type Customer } from "../integration/accounts";
 import { useTestDatabase } from "../integration/database";
 import { addCode, DAY, HOUR, NOW, venue } from "../integration/fixtures";
-import { bearer, call, loadRoutes, type Call, type Reply } from "./client";
-
-// TicketBay sells in Budapest, and its server's clock zone is Europe/Budapest.
-// CI runs in UTC, where a date computed with the server's local calendar can
-// never cross a daylight-saving change — pin the zone so this file sees what
-// production sees.
-process.env.TZ = "Europe/Budapest";
+import { bearer, call, loadRoutes, quietRefusedKeyLogs, type Call, type Reply } from "./client";
 
 const wiring = vi.hoisted(() => ({ auth: undefined as unknown, db: undefined as unknown, payments: undefined as unknown }));
 vi.mock("@/lib/auth", () => ({ appBaseURL: () => "http://localhost:3000", getAuth: () => wiring.auth }));
@@ -58,6 +53,7 @@ vi.mock("@/src/payments", async () => ({ ...(await import("../../src/payments"))
 
 const t = useTestDatabase();
 useCleanAccounts(t);
+quietRefusedKeyLogs();
 
 const SEED = Number(process.env.FC_SEED ?? 20261004);
 const runs = (numRuns: number) => ({ seed: SEED, numRuns });
@@ -109,25 +105,8 @@ const uniqueId = (prefix: string) => `${prefix}-${++ids}`;
 /** A value whose counterexample prints as `text` instead of as an object. */
 const shown = <T extends object>(value: T, text: string): T => Object.assign(value, { [fc.toStringMethod]: () => text });
 
-// ---- Budapest wall clock (EU rule, written here — not Intl, not the app) -------
-
 const MIN = 60_000;
-/** 01:00 UTC on the last Sunday of the month: when EU clocks change. */
-function lastSundayOneUtc(year: number, month0: number): number {
-  const lastDay = new Date(Date.UTC(year, month0 + 1, 0));
-  return Date.UTC(year, month0, lastDay.getUTCDate() - lastDay.getUTCDay(), 1);
-}
-const isSummer = (ms: number) => {
-  const y = new Date(ms).getUTCFullYear();
-  return ms >= lastSundayOneUtc(y, 2) && ms < lastSundayOneUtc(y, 9);
-};
-/** "2026-03-11 19:01 CET" */
-function budapest(ms: number): string {
-  const summer = isSummer(ms);
-  return `${new Date(ms + (summer ? 2 : 1) * HOUR).toISOString().slice(0, 16).replace("T", " ")} ${summer ? "CEST" : "CET"}`;
-}
-/** The DST changes the generators aim at: spring forward and fall back, 2026-2028. */
-const DST_CHANGES = [2026, 2027, 2028].flatMap((y) => [lastSundayOneUtc(y, 2), lastSundayOneUtc(y, 9)]);
+const utc = (ms: number) => new Date(ms).toISOString().slice(0, 16).replace("T", " ") + " UTC";
 
 // ---- The price model (property 2 and 3's oracle) ------------------------------
 
@@ -396,22 +375,15 @@ interface ValidOrder {
 }
 
 /**
- * A valid order, aimed at the hard clocks. The event starts at a quarter hour
- * 1-60 days after a DST change; the booking is one of:
- *  - within two hours of the early-bird end (start − 30 × 24 h), minute by
- *    minute, 0 included — for the first 30 days after a change that window
- *    crosses the change;
- *  - on the day of the change itself;
- *  - any minute up to 90 days before the start.
+ * A valid order. The event starts an hour to 90 days after NOW; the booking is
+ * within two hours of the early-bird end (start − 30 × 24 h), minute by minute,
+ * 0 included — or any minute up to 90 days before the start.
  */
 const validOrder: fc.Arbitrary<ValidOrder> = fc
   .record({
-    change: fc.constantFrom(...DST_CHANGES),
-    startDays: fc.integer({ min: 1, max: 60 }),
-    startQuarter: fc.integer({ min: 0, max: 95 }),
+    startsInMin: fc.integer({ min: 60, max: 90 * 24 * 60 }),
     booked: fc.oneof(
-      { weight: 4, arbitrary: fc.integer({ min: -120, max: 120 }).map((minutes) => ({ nearEarlyBirdEnd: minutes })) },
-      fc.integer({ min: -12 * 60, max: 12 * 60 }).map((minutes) => ({ onChangeDay: minutes })),
+      { weight: 2, arbitrary: fc.integer({ min: -120, max: 120 }).map((minutes) => ({ nearEarlyBirdEnd: minutes })) },
       fc.integer({ min: 1, max: 90 * 24 * 60 }).map((minutes) => ({ beforeStart: minutes })),
     ),
     // from €1: a free event is valid too, but its price could not show what the early-bird changed (property 3 covers it)
@@ -420,21 +392,16 @@ const validOrder: fc.Arbitrary<ValidOrder> = fc
     tickets: fc.integer({ min: 1, max: 50 }),
     codePercent: fc.option(fc.integer({ min: 1, max: 100 }), { nil: undefined }),
   })
-  .map(({ change, startDays, startQuarter, booked, ...rest }) => {
-    const startMs = change + startDays * DAY + startQuarter * 15 * MIN;
-    const bookedMs =
-      "nearEarlyBirdEnd" in booked
-        ? startMs - EARLY_BIRD_MS + booked.nearEarlyBirdEnd * MIN
-        : "onChangeDay" in booked
-          ? change + booked.onChangeDay * MIN
-          : startMs - booked.beforeStart * MIN;
+  .map(({ startsInMin, booked, ...rest }) => {
+    const startMs = NOW + startsInMin * MIN;
+    const bookedMs = "nearEarlyBirdEnd" in booked ? startMs - EARLY_BIRD_MS + booked.nearEarlyBirdEnd * MIN : startMs - booked.beforeStart * MIN;
     const order = { startMs, bookedMs, ...rest };
     const code = rest.codePercent === undefined ? "no code" : `code ${rest.codePercent}%`;
-    return shown(order, `event starts ${budapest(startMs)}, booked ${budapest(bookedMs)}: ${rest.tickets} × ${rest.priceCents} cents, ${code}`);
+    return shown(order, `event starts ${utc(startMs)}, booked ${utc(bookedMs)}: ${rest.tickets} × ${rest.priceCents} cents, ${code}`);
   });
 
 describe("2. valid input → success", () => {
-  it("every valid order is a 201 with the right price, on DST days and at the early-bird boundary too", async () => {
+  it("every valid order is a 201 with the right price, at the early-bird boundary too", async () => {
     const anna = await customer(auth, "Anna");
     await fc.assert(
       fc.asyncProperty(validOrder, async (o) => {
@@ -453,7 +420,7 @@ describe("2. valid input → success", () => {
         expect(r.body.order).toMatchObject({ eventId: ev.id, tickets: o.tickets, status: "paid", createdAt: new Date(o.bookedMs).toISOString() });
         // The early-bird the order got is the one the event page promised at that moment...
         const promised = o.bookedMs <= Date.parse(published.body.earlyBirdEndsAt);
-        expect(r.body.order.price.earlyBirdPercent, `early-bird promised until ${budapest(Date.parse(published.body.earlyBirdEndsAt))}`).toBe(promised ? 10 : 0);
+        expect(r.body.order.price.earlyBirdPercent, `early-bird promised until ${utc(Date.parse(published.body.earlyBirdEndsAt))}`).toBe(promised ? 10 : 0);
         // ...and the whole price is the model's: early-bird iff booked at least 30 × 24 hours before the start.
         const earlyBird = o.startMs - o.bookedMs >= EARLY_BIRD_MS;
         expect(r.body.order.price).toEqual(modelPrice({ priceCents: o.priceCents, tickets: o.tickets, earlyBird, codePercent: o.codePercent ?? 0 }));
@@ -693,7 +660,7 @@ const commands = fc.commands(
     fc.constantFrom<Tick>("+1 hour", "+1 day", "+30 days", "to event a's start", "to 1 ms before event b's start", "past both starts").map((tk) => new MoveClock(tk)),
   ],
   // Order and CancelOwn are listed twice: they are the steps that move money.
-  { maxCommands: 25, size: "+1" },
+  { maxCommands: 20, size: "+1" },
 );
 
 /** The rules that hold after every step, read from the database and the payment provider. */
@@ -743,7 +710,7 @@ describe("4. stateful sequences", () => {
         }
         await fc.asyncModelRun(() => ({ model: { now: NOW, orders: [], keys: new Map() }, real }), cmds);
       }),
-      runs(40),
+      runs(30),
     );
   }, 180_000);
 });

@@ -6,6 +6,7 @@
 // points the app's singletons (getDb / getAuth / getPayments) at it, the way
 // tests/integration/mcp-route.test.ts does.
 import { NextRequest } from "next/server";
+import { afterAll, beforeAll } from "vitest";
 import { TEST_CLOCK_COOKIE } from "../../lib/clock";
 import { config as proxyConfig, proxy } from "../../proxy";
 
@@ -146,3 +147,22 @@ export async function read(res: Response): Promise<Reply> {
 export const call = async (c: Call): Promise<Reply> => read(await fetchApi(request(c)));
 
 export const bearer = (key: string) => ({ authorization: `Bearer ${key}` });
+
+/**
+ * Better Auth logs every refused API key as an ERROR with the whole error
+ * object, five lines each. The API already answers those with a 401, and a
+ * property sends hundreds of bad keys — so a test file can drop exactly those
+ * lines and keep its output readable. Every other log line stays.
+ */
+export function quietRefusedKeyLogs() {
+  const original = console.error;
+  beforeAll(() => {
+    console.error = (first?: unknown, ...rest: unknown[]) => {
+      if (typeof first === "string" && first.includes("[Better Auth]") && first.includes("Failed to validate API key")) return;
+      original(first, ...rest);
+    };
+  });
+  afterAll(() => {
+    console.error = original;
+  });
+}

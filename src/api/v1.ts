@@ -156,15 +156,25 @@ const NOT_FOUND = new Set(["Event not found.", "Order not found."]);
 export const error = (status: number, message: string, headers: Record<string, string> = {}) =>
   Response.json({ error: message }, { status, headers });
 
+/**
+ * One log line for an unexpected failure: the request and the root cause (a
+ * driver error, not drizzle's wrapper that repeats the whole query).
+ */
+function logFailure(request: Request, e: unknown) {
+  const cause = (e as { cause?: unknown })?.cause ?? e;
+  const why = cause instanceof Error ? `${cause.name}: ${cause.message}` : String(cause);
+  console.error(`[api/v1] 500 ${request.method} ${new URL(request.url).pathname}: ${why.replace(/\s+/g, " ")}`);
+}
+
 /** Runs a handler and turns every refusal into its 4xx; anything else is a logged 500. */
-async function handle(run: () => Promise<Response>): Promise<Response> {
+async function handle(request: Request, run: () => Promise<Response>): Promise<Response> {
   try {
     return await run();
   } catch (e) {
     if (e instanceof ApiError) return error(e.status, e.message, e.headers);
     if (e instanceof OrderError) return error(NOT_FOUND.has(e.message) ? 404 : 422, e.message);
     if (e instanceof PaymentError) return error(402, `Payment failed: ${e.message}`);
-    console.error("[api/v1] unexpected error:", e);
+    logFailure(request, e);
     return error(500, "Something went wrong on our side. Try again later.");
   }
 }
@@ -173,7 +183,7 @@ async function handle(run: () => Promise<Response>): Promise<Response> {
 
 /** GET /api/v1/events */
 export function listEventsEndpoint(deps: ApiDeps, request: Request): Promise<Response> {
-  return handle(async () => {
+  return handle(request, async () => {
     const nowMs = deps.now(request);
     return Response.json({ events: (await listEvents(deps.db)).map((ev) => eventJson(ev, nowMs)) });
   });
@@ -181,7 +191,7 @@ export function listEventsEndpoint(deps: ApiDeps, request: Request): Promise<Res
 
 /** GET /api/v1/events/{id} */
 export function getEventEndpoint(deps: ApiDeps, request: Request, id: string): Promise<Response> {
-  return handle(async () => {
+  return handle(request, async () => {
     const ev = EventId.safeParse(id).success ? await getEvent(deps.db, id) : undefined;
     if (!ev) throw new ApiError(404, "Event not found.");
     return Response.json({ ...eventJson(ev, deps.now(request)), description: ev.description });
@@ -190,7 +200,7 @@ export function getEventEndpoint(deps: ApiDeps, request: Request, id: string): P
 
 /** POST /api/v1/quote — prices a cart; books and charges nothing. */
 export function quoteEndpoint(deps: ApiDeps, request: Request): Promise<Response> {
-  return handle(async () => {
+  return handle(request, async () => {
     const cart = await readBody(request, CartBody);
     const { invoice, code } = await quoteOrder({ db: deps.db, nowMs: deps.now(request) }, cart.eventId, cart.tickets, cart.code ?? "");
     return Response.json({ eventId: cart.eventId, tickets: cart.tickets, code, price: priceJson(invoice) });
@@ -199,7 +209,7 @@ export function quoteEndpoint(deps: ApiDeps, request: Request): Promise<Response
 
 /** POST /api/v1/orders — books and pays. 201 for a new order, 200 for a replay of the same Idempotency-Key. */
 export function placeOrderEndpoint(deps: ApiDeps, request: Request): Promise<Response> {
-  return handle(async () => {
+  return handle(request, async () => {
     const caller = await writer(deps, request);
     const key = IdempotencyKey.safeParse(request.headers.get("idempotency-key") ?? "");
     if (!key.success) {
@@ -225,7 +235,7 @@ export function placeOrderEndpoint(deps: ApiDeps, request: Request): Promise<Res
 
 /** POST /api/v1/orders/{id}/cancel — cancels one of the caller's own orders and refunds it by the refund rules. */
 export function cancelOrderEndpoint(deps: ApiDeps, request: Request, id: string): Promise<Response> {
-  return handle(async () => {
+  return handle(request, async () => {
     const caller = await writer(deps, request);
     // An id that cannot name an order is simply not found — the same answer as someone else's order.
     if (!OrderIdParam.safeParse(id).success) throw new ApiError(404, "Order not found.");

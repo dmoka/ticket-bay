@@ -15,7 +15,7 @@ import { createFakeStripe } from "../../src/payments";
 import { customer, makeAuth, revokeKey, scopedKey, useCleanAccounts, type Customer } from "../integration/accounts";
 import { useTestDatabase } from "../integration/database";
 import { addCode, DAY, HOUR, NOW, venue } from "../integration/fixtures";
-import { bearer, call, loadRoutes, type Call } from "./client";
+import { bearer, call, loadRoutes, quietRefusedKeyLogs, type Call } from "./client";
 
 const wiring = vi.hoisted(() => ({ auth: undefined as unknown, db: undefined as unknown, payments: undefined as unknown }));
 vi.mock("@/lib/auth", () => ({ appBaseURL: () => "http://localhost:3000", getAuth: () => wiring.auth }));
@@ -27,6 +27,7 @@ vi.mock("@/src/payments", async () => ({ ...(await import("../../src/payments"))
 
 const t = useTestDatabase();
 useCleanAccounts(t);
+quietRefusedKeyLogs();
 
 let auth: Auth;
 

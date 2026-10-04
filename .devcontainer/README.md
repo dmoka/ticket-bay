@@ -33,7 +33,7 @@ Prefer an editor? VS Code and Cursor open the same box with "Reopen in Container
 - Anything inside the box can still leak: the repo, and any token you put in. Keep secrets out; use repo-scoped, short-lived tokens.
 - Allowed hosts are a way out too (for example GitHub, if you log `gh` in), and DNS lookups still leave the box.
 - The repo folder is shared with your machine, so the agent's edits land on your disk. Git is the undo button.
-- Integration and UI tests need Docker (Testcontainers), and giving the box the Docker socket would give it your machine. They run in the CI gate (.github/workflows/gate.yml) on every pull request and every push to main; run `npm test` and `npm run test:ui` outside the box if you need them locally.
+- The box has no Docker socket (it would give the box your machine), so Testcontainers cannot run here. The Postgres tests fall back to the box's own database instead: `./box npm run test:http` (or `test:integration`, or `npm test`) creates throwaway databases next to the app's on `db:5432` and drops them at the end. UI tests (Playwright) still need Docker: they run in the CI gate (.github/workflows/gate.yml) on every pull request and every push to main; run `npm run test:ui` outside the box if you need them locally.
 
 Use it on repos you trust, and watch what the agent does.
 

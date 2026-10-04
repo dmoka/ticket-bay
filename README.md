@@ -94,9 +94,15 @@ curl -X POST localhost:3000/api/v1/orders/42/cancel -H "Authorization: Bearer $T
 `tests/http/` tests it through the proxy and the route handlers with real `Request`s against a real Postgres: the happy paths and auth, plus four HTTP-level properties (fast-check, fixed seed, `FC_SEED=<n>` to explore):
 
 1. **Robustness:** any method, path, Content-Type, Accept, body and Authorization → a status below 500 and a JSON body.
-2. **Valid input → success:** every valid order is a `201` with the right price, including bookings at the early-bird boundary and across a daylight-saving change in Europe/Budapest.
+2. **Valid input → success:** every valid order is a `201` with the right price, bookings at the early-bird boundary included.
 3. **Oracle:** a quote equals a simple price model written in the test.
 4. **Stateful:** random sequences of quotes, orders, retries, cancels and clock moves by three users keep seats, refunds, money and idempotency consistent after every step.
+
+In the box (no Docker there), the same tests run against the box's own Postgres — they create their own databases next to the app's and drop them at the end:
+
+```bash
+./box npm run test:http
+```
 
 `npm run db:up` starts Postgres 17 from `docker-compose.yml` (port 5432, named volume `ticketbay-pg`) and waits until it is healthy. Its local-only credentials and `DATABASE_URL` live in `.env.example`; the scripts read it when there is no `.env`. Copy it to `.env` to change anything. Port 5432 taken by another Postgres? Put `POSTGRES_PORT=5433` in `.env` and use the same port in its `DATABASE_URL`. `npm run db:down` stops the database; `docker compose down -v` also deletes its data.
 
@@ -106,6 +112,8 @@ curl -X POST localhost:3000/api/v1/orders/42/cancel -H "Authorization: Bearer $T
 | `npm run test:unit` | The same minus the integration tests — no Docker needed |
 | `npm run test:integration` | Only the Postgres integration tests |
 | `npm run test:http` | The REST API through its route handlers: integration tests and HTTP-level property tests (Postgres) |
+
+The Postgres lanes start a container with Testcontainers. Without Docker (inside `./box`), or with `TICKETBAY_TEST_DB=external`, they use the Postgres at `DATABASE_URL` instead: each run creates a template database and one database per test file there, and drops them when it ends. The database `DATABASE_URL` names is never touched.
 | `npm run test:ui` | Playwright: the critical money paths against a production build and its own Postgres container |
 | `npm run test:mutation` | Stryker on `src/domain` (unit lane) |
 | `npm run typecheck` / `npm run build` | `tsc --noEmit` / production build |

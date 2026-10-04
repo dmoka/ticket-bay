@@ -9,7 +9,6 @@ import { afterAll, beforeAll, beforeEach, inject } from "vitest";
 import { sql } from "drizzle-orm";
 import { closeDb, openDb, type Db } from "../../src/db/client";
 import { discountCodes, events, orders } from "../../src/db/schema";
-import { TEMPLATE_DATABASE } from "./template";
 
 async function admin<T>(run: (c: Client) => Promise<T>): Promise<T> {
   const c = new Client({ connectionString: inject("adminDatabaseUrl") });
@@ -39,7 +38,7 @@ export function useTestDatabase({ truncate = true }: { truncate?: boolean } = {}
   let db: Db | undefined;
 
   beforeAll(async () => {
-    await admin((c) => c.query(`CREATE DATABASE ${name} TEMPLATE ${TEMPLATE_DATABASE}`));
+    await admin((c) => c.query(`CREATE DATABASE ${name} TEMPLATE ${inject("templateDatabase")}`));
     db = openDb(url.toString());
   });
 
