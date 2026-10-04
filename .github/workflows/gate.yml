@@ -65,6 +65,19 @@ jobs:
       - run: npm ci
       - run: npm run test:integration
 
+  http:
+    name: REST API + HTTP properties (Postgres)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run test:http
+
   ui:
     name: critical UI flows (Playwright)
     runs-on: ubuntu-latest

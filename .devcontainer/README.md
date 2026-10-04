@@ -52,7 +52,7 @@ brew install colima
 - Anything inside the box can still leak: the repo, and any token you put in. Keep secrets out; use repo-scoped, short-lived tokens.
 - Allowed hosts are a way out too (for example GitHub, if you log `gh` in), and DNS lookups still leave the box.
 - The repo folder is shared with your machine, so the agent's edits land on your disk. Git is the undo button.
-- Integration and UI tests need Docker (Testcontainers). Plain `./box` has none: use `./box --docker`, or the CI gate (.github/workflows/gate.yml), which runs them on every pull request and every push to main.
+- Plain `./box` has no Docker socket (it would give the box your machine), so Testcontainers cannot run there. The Postgres tests fall back to the box's own database instead: `./box npm run test:http` (or `test:integration`, or `npm test`) creates throwaway databases next to the app's on `db:5432` and drops them at the end. UI tests (Playwright) need Docker: use `./box --docker`, or the CI gate (.github/workflows/gate.yml), which runs them on every pull request and every push to main.
 - `./box --docker`: the socket makes the agent root in the VM. A container started with `--privileged` or `--network host` skips the VM's firewall and reaches the internet and the ports on your machine (`host.docker.internal`). Your files stay out of reach: the VM shares only this repo.
 
 Use it on repos you trust, and watch what the agent does.
