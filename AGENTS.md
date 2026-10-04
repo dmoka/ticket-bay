@@ -39,6 +39,7 @@ Stryker refuse) reports **BLOCKED**, never green. Blocked is not a pass.
 - `npm run test:mutation:integration` — mutation testing for `src/db` and `src/services`, which
   only the integration lane covers. Needs Docker, runs at concurrency 1 on purpose.
 - `npm run test:integration` — integration tests (Testcontainers Postgres; requires Docker)
+- `npm run test:http` — the REST API (`app/api/v1`) through its route handlers: integration + HTTP property tests (Testcontainers Postgres; in the box, without Docker, the box's own Postgres)
 - `npm run test:ui` — Playwright flows (critical money paths only; Testcontainers Postgres)
 
 ## Fixing a reported bug

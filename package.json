@@ -19,6 +19,7 @@
     "test:unit": "vitest run --config vitest.unit.config.ts",
     "test:domain": "vitest run --config vitest.unit.config.ts tests/domain",
     "test:integration": "vitest run tests/integration",
+    "test:http": "vitest run tests/http",
     "test:ui": "playwright test",
     "test:mutation": "stryker run",
     "test:mutation:integration": "stryker run stryker.integration.config.json",
@@ -60,6 +61,7 @@
     "drizzle-kit": "^0.31.11",
     "fast-check": "^3.23.2",
     "tailwindcss": "^4.3.3",
+    "testcontainers": "^12.1.0",
     "tsx": "^4.23.15",
     "typescript": "^5.9.3",
     "vitest": "^2.1.9"
