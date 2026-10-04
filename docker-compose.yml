@@ -1,6 +1,7 @@
 # Local development database. `npm run db:up` starts it and waits until it is
 # healthy; `docker compose down` stops it (add -v to also delete the data).
 # Credentials come from .env.example (local-only values), overridden by .env.
+# Port 5432 taken? Set POSTGRES_PORT in .env (and the same port in DATABASE_URL there).
 services:
   postgres:
     image: postgres:17
@@ -9,7 +10,7 @@ services:
       - path: .env
         required: false
     ports:
-      - "5432:5432"
+      - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - ticketbay-pg:/var/lib/postgresql/data
     healthcheck:

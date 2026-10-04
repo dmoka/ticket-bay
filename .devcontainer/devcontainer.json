@@ -2,16 +2,10 @@
   // TicketBay sandbox. Based on Anthropic's reference dev container:
   // https://github.com/anthropics/claude-code/tree/main/.devcontainer (MIT)
   "name": "TicketBay Sandbox",
-  "build": {
-    "dockerfile": "Dockerfile",
-    "args": {
-      "TZ": "${localEnv:TZ:Europe/Budapest}",
-      "CLAUDE_CODE_VERSION": "2.1.284",
-      "GIT_DELTA_VERSION": "0.18.2"
-    }
-  },
-  // The firewall runs inside the container, so it needs these two capabilities.
-  "runArgs": ["--cap-add=NET_ADMIN", "--cap-add=NET_RAW"],
+  // Two containers (compose.yaml): this one, and the Postgres it reaches as db:5432.
+  "dockerComposeFile": "compose.yaml",
+  "service": "app",
+  "runServices": ["app", "db"],
   "customizations": {
     "vscode": {
       "extensions": ["anthropic.claude-code", "dbaeumer.vscode-eslint"]
@@ -28,9 +22,10 @@
     "NODE_OPTIONS": "--max-old-space-size=4096",
     "CLAUDE_CONFIG_DIR": "/home/node/.claude",
     "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
-    "DISABLE_AUTOUPDATER": "1"
+    "DISABLE_AUTOUPDATER": "1",
+    // No claude.ai connectors (Gmail, Drive, ...) in the box: they would reach past the firewall.
+    "ENABLE_CLAUDEAI_MCP_SERVERS": "false"
   },
-  "workspaceMount": "source=${localWorkspaceFolder},target=/workspace,type=bind,consistency=delegated",
   "workspaceFolder": "/workspace",
   "postCreateCommand": "sudo chown node:node /workspace/node_modules",
   "postStartCommand": "sudo /usr/local/bin/init-firewall.sh",

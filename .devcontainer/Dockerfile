@@ -11,6 +11,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   iptables ipset iproute2 dnsutils aggregate jq nano curl ca-certificates \
   && apt-get clean && rm -rf /var/lib/apt/lists/*
 
+# Chromium's system libraries, so Playwright MCP can run a browser in the box (the node user has no apt).
+RUN npx --yes playwright@1.63.0 install-deps chromium \
+  && apt-get clean && rm -rf /var/lib/apt/lists/*
+
 RUN mkdir -p /usr/local/share/npm-global && chown -R node:node /usr/local/share
 
 # Persist bash history across rebuilds.
@@ -36,6 +40,12 @@ ENV EDITOR=nano
 # Pinned, so every student gets the same Claude Code (auto-update is off in devcontainer.json).
 ARG CLAUDE_CODE_VERSION=2.1.284
 RUN npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}
+
+# Playwright MCP, pinned, with its browser downloaded here at build time: the firewall allows no
+# browser downloads, so @latest would ask for a browser the running box cannot fetch.
+# Keep the version in sync with compose.yaml and the `claude mcp add` line in README.md.
+ARG PLAYWRIGHT_MCP_VERSION=0.0.83
+RUN npx --yes @playwright/mcp@${PLAYWRIGHT_MCP_VERSION} install-browser chrome-for-testing
 
 # The firewall script. The node user may run exactly this one script as root.
 COPY init-firewall.sh /usr/local/bin/

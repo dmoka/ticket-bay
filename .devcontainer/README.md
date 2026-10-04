@@ -14,9 +14,19 @@ Based on [Anthropic's reference dev container](https://github.com/anthropics/cla
 Inside, Claude Code runs with `--dangerously-skip-permissions`: the box is the safety, and it runs as the non-root `node` user, which that flag requires. First run: `./box npm ci`.
 Prefer an editor? VS Code and Cursor open the same box with "Reopen in Container".
 
+**The app in the box.** The box is two containers (`compose.yaml`): `app`, where you and the agent work, and `db`, its own Postgres 17. `DATABASE_URL` points at `db:5432`, so `npm run db:migrate`, `npm run db:seed` and `npm run dev` work inside the box. Open http://localhost:3000 on your machine: port 3000 is published on 127.0.0.1 only. Port 3000 taken? Start the box with `BOX_PORT=3100 ./box` and open http://localhost:3100 (a running box keeps its port: to change it, run `docker compose -p <repo-folder>_devcontainer down`, e.g. `ticket-bay_devcontainer`, then `./box` again; the box database survives). The box database is separate from the one `npm run db:up` starts, and it is not published to your machine.
+
+**Playwright MCP in the box.** The image has Playwright MCP 0.0.83's browser and Chromium's system libraries, both installed at build time. The firewall allows no browser downloads, so the version is pinned: `@latest` would ask for a newer browser the box cannot fetch. The box is Linux arm64 on Apple Silicon, where Playwright MCP's default Chrome channel does not exist, so add it with `--browser chromium`:
+
+```bash
+./box claude mcp add --scope project playwright -- npx @playwright/mcp@0.0.83 --browser chromium
+```
+
+**No claude.ai connectors.** Signing in to Claude in the box would also bring your claude.ai connectors (Gmail, Drive, Calendar, ...) into Claude Code. The box turns them off (`ENABLE_CLAUDEAI_MCP_SERVERS=false` in `devcontainer.json`): the box limits what the agent can reach, and a connector would reach past the firewall.
+
 **What it does**
 - The agent sees this repo and nothing else from your machine: no home folder, no `~/.ssh`, no Docker socket.
-- Outgoing traffic is default-deny. Allowed: GitHub, the npm registry, and Claude's API and sign-in. Everything else is blocked (`init-firewall.sh`, checked on every start).
+- Outgoing traffic is default-deny. Allowed: GitHub, the npm registry, Claude's API and sign-in, and the box's own Postgres (`db:5432`). Everything else is blocked (`init-firewall.sh`, checked on every start).
 - The agent cannot change the firewall: its only root command is the firewall script itself.
 
 **What it does not do**
