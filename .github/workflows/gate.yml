@@ -1,8 +1,8 @@
 # The gate: nothing merges red. One job per lane so a failure says which lane.
 # The secret scan runs first in the list and blocks like any test.
 # Unit + property tests also run inside the sandbox box (./box); integration and
-# UI tests need Docker, so they run here, on every push to main/loop-test and
-# on every pull request.
+# UI tests need Docker, so they run inside `./box --docker` and here, on every
+# push to main/loop-test and on every pull request.
 name: gate
 
 on:

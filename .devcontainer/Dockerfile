@@ -31,6 +31,12 @@ RUN ARCH=$(dpkg --print-architecture) && \
   curl -fsSLO "https://github.com/dandavison/delta/releases/download/${GIT_DELTA_VERSION}/git-delta_${GIT_DELTA_VERSION}_${ARCH}.deb" && \
   dpkg -i "git-delta_${GIT_DELTA_VERSION}_${ARCH}.deb" && rm "git-delta_${GIT_DELTA_VERSION}_${ARCH}.deb"
 
+# The docker CLI only (no engine). It does nothing in the plain box, which has no socket;
+# `./box --docker` gives it the socket of the box's own Colima VM.
+ARG DOCKER_CLI_VERSION=29.8.2
+RUN curl -fsSL "https://download.docker.com/linux/static/stable/$(uname -m)/docker-${DOCKER_CLI_VERSION}.tgz" | \
+  tar -xz -C /usr/local/bin --strip-components=1 docker/docker
+
 USER node
 ENV NPM_CONFIG_PREFIX=/usr/local/share/npm-global
 ENV PATH=$PATH:/usr/local/share/npm-global/bin
@@ -46,6 +52,10 @@ RUN npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}
 # Keep the version in sync with compose.yaml and the `claude mcp add` line in README.md.
 ARG PLAYWRIGHT_MCP_VERSION=0.0.83
 RUN npx --yes @playwright/mcp@${PLAYWRIGHT_MCP_VERSION} install-browser chrome-for-testing
+
+# The browser of the UI tests (npm run test:ui, in `./box --docker`), for the same reason.
+# Keep the version in sync with @playwright/test in package-lock.json.
+RUN npx --yes playwright@1.63.0 install chromium-headless-shell
 
 # The firewall script. The node user may run exactly this one script as root.
 COPY init-firewall.sh /usr/local/bin/
