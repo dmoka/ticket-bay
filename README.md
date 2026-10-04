@@ -64,6 +64,35 @@ mcp_servers:
 
 Which clients accept a key header (and which would need OAuth): [`docs/mcp-client-auth-2026.md`](docs/mcp-client-auth-2026.md). The end-to-end proof: [`docs/mcp-e2e-2026.md`](docs/mcp-e2e-2026.md).
 
+## The REST API
+
+A small public JSON API under `/api/v1` (route handlers in `app/api/v1`, logic in `src/api/v1.ts`). It runs the same services as the web app and the MCP server, so prices, seats, refunds and idempotency follow the same rules.
+
+| Endpoint | Auth | What it does |
+|---|---|---|
+| `GET /api/v1/events` | none | Every event: price in cents, seats left, status |
+| `GET /api/v1/events/{id}` | none | One event, with its description |
+| `POST /api/v1/quote` | none | Body `{eventId, tickets, code?}` → the price breakdown. Books nothing |
+| `POST /api/v1/orders` | key, read & write | Same body, plus an `Idempotency-Key` header → books and pays. `201` new order, `200` replay of the same key |
+| `POST /api/v1/orders/{id}/cancel` | key, read & write | Cancels one of **your** orders → the refund. Someone else's order is `404 Order not found.` |
+
+- **Auth:** the same API keys as the MCP server (**Settings → Developers**), sent as `Authorization: Bearer tb_…`. No key or a bad key → `401`; a read-only key → `403`.
+- **Money** is integer cents; times are ISO 8601. `tickets` is a whole number from 1 to 50.
+- **Errors** are JSON `{"error": "..."}`: `400` malformed request, `404` not found, `422` refused by a rule (sold out, sales closed, code expired, already refunded), `402` payment failed. A `500` never carries internal details.
+- **Idempotency-Key:** 1-100 characters, one per purchase. Resend it only to retry the same purchase: you get the original order back and the card is charged once.
+
+```bash
+curl localhost:3000/api/v1/events
+curl -X POST localhost:3000/api/v1/quote -H 'content-type: application/json' \
+  -d '{"eventId": "midnight-arcade-neon-tour", "tickets": 2, "code": "WELCOME10"}'
+curl -X POST localhost:3000/api/v1/orders -H 'content-type: application/json' \
+  -H "Authorization: Bearer $TICKETBAY_API_KEY" -H "Idempotency-Key: $(uuidgen)" \
+  -d '{"eventId": "midnight-arcade-neon-tour", "tickets": 2}'
+curl -X POST localhost:3000/api/v1/orders/42/cancel -H "Authorization: Bearer $TICKETBAY_API_KEY"
+```
+
+`tests/http/` tests it through the route handlers with real `Request`s against a real Postgres: the happy paths and auth, plus HTTP-level properties (fast-check) — never a 500 for any generated request, quote = order, one order per Idempotency-Key, and the refund rule on both sides of the event start.
+
 `npm run db:up` starts Postgres 17 from `docker-compose.yml` (port 5432, named volume `ticketbay-pg`) and waits until it is healthy. Its local-only credentials and `DATABASE_URL` live in `.env.example`; the scripts read it when there is no `.env`. Copy it to `.env` to change anything. Port 5432 taken by another Postgres? Put `POSTGRES_PORT=5433` in `.env` and use the same port in its `DATABASE_URL`. `npm run db:down` stops the database; `docker compose down -v` also deletes its data.
 
 | Command | What it runs |
@@ -71,6 +100,7 @@ Which clients accept a key header (and which would need OAuth): [`docs/mcp-clien
 | `npm test` | Vitest: domain unit + property tests, payments, and the integration tests against a real Postgres (Testcontainers starts one container for the run) |
 | `npm run test:unit` | The same minus the integration tests — no Docker needed |
 | `npm run test:integration` | Only the Postgres integration tests |
+| `npm run test:http` | The REST API through its route handlers: integration tests and HTTP-level property tests (Postgres) |
 | `npm run test:ui` | Playwright: the critical money paths against a production build and its own Postgres container |
 | `npm run test:mutation` | Stryker on `src/domain` (unit lane) |
 | `npm run typecheck` / `npm run build` | `tsc --noEmit` / production build |
