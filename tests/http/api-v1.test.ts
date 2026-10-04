@@ -15,7 +15,7 @@ import { createFakeStripe } from "../../src/payments";
 import { customer, makeAuth, revokeKey, scopedKey, useCleanAccounts, type Customer } from "../integration/accounts";
 import { useTestDatabase } from "../integration/database";
 import { addCode, DAY, HOUR, NOW, venue } from "../integration/fixtures";
-import { bearer, loadRoutes, read, request, type Call, type Routes } from "./client";
+import { bearer, call, loadRoutes, type Call } from "./client";
 
 const wiring = vi.hoisted(() => ({ auth: undefined as unknown, db: undefined as unknown, payments: undefined as unknown }));
 vi.mock("@/lib/auth", () => ({ appBaseURL: () => "http://localhost:3000", getAuth: () => wiring.auth }));
@@ -29,7 +29,6 @@ const t = useTestDatabase();
 useCleanAccounts(t);
 
 let auth: Auth;
-let routes: Routes;
 
 beforeAll(async () => {
   process.env.TICKETBAY_TEST_CLOCK = "1";
@@ -37,7 +36,7 @@ beforeAll(async () => {
   wiring.auth = auth;
   wiring.db = t.db;
   wiring.payments = createFakeStripe("sk_test_integration");
-  routes = await loadRoutes();
+  await loadRoutes();
 });
 
 afterAll(() => {
@@ -45,16 +44,11 @@ afterAll(() => {
 });
 
 const at = (c: Call): Call => ({ nowMs: NOW, ...c });
-const get = async (path: string, c: Partial<Call> = {}) => {
-  const req = request(at({ path, ...c }));
-  const id = path.split("/")[4];
-  return read(await (id === undefined ? routes.listEvents(req) : routes.getEvent(req, decodeURIComponent(id))));
-};
-const quote = async (json: unknown, c: Partial<Call> = {}) => read(await routes.quote(request(at({ method: "POST", path: "/api/v1/quote", json, ...c }))));
-const order = async (json: unknown, headers: Record<string, string>, c: Partial<Call> = {}) =>
-  read(await routes.placeOrder(request(at({ method: "POST", path: "/api/v1/orders", json, headers, ...c }))));
-const cancel = async (id: number | string, headers: Record<string, string>, c: Partial<Call> = {}) =>
-  read(await routes.cancelOrder(request(at({ method: "POST", path: `/api/v1/orders/${id}/cancel`, headers, ...c })), String(id)));
+const get = (path: string, c: Partial<Call> = {}) => call(at({ path, ...c }));
+const quote = (json: unknown, c: Partial<Call> = {}) => call(at({ method: "POST", path: "/api/v1/quote", json, ...c }));
+const order = (json: unknown, headers: Record<string, string>, c: Partial<Call> = {}) => call(at({ method: "POST", path: "/api/v1/orders", json, headers, ...c }));
+const cancel = (id: number | string, headers: Record<string, string>, c: Partial<Call> = {}) =>
+  call(at({ method: "POST", path: `/api/v1/orders/${encodeURIComponent(id)}/cancel`, headers, ...c }));
 
 const book = async (c: Customer, eventId: string, tickets = 2, key = `k-${Math.random()}`) => {
   const r = await order({ eventId, tickets }, { ...bearer(c.key), "idempotency-key": key });
@@ -86,6 +80,7 @@ describe("GET /api/v1/events", () => {
       totalSeats: 100,
       seatsLeft: 60,
       status: "on-sale",
+      earlyBirdEndsAt: new Date(NOW - 20 * DAY).toISOString(),
     });
     expect(r.body.events.find((e: { id: string }) => e.id === "past-show").status).toBe("past");
   });
@@ -294,6 +289,33 @@ describe("POST /api/v1/orders/{id}/cancel", () => {
     expect((await cancel(o.id, {})).status).toBe(401);
     expect((await cancel(o.id, bearer(key))).status).toBe(403);
     expect((await getOrder(t.db, o.id))!.status).toBe("paid");
+  });
+});
+
+describe("paths and methods", () => {
+  it("a path under /api/v1 that names no endpoint is a JSON 404", async () => {
+    for (const path of ["/api/v1", "/api/v1/nope", "/api/v1/events/rockfest/tickets", "/api/v1/orders/1"]) {
+      const r = await get(path);
+      expect(r, path).toMatchObject({ status: 404, isJson: true, body: { error: expect.stringMatching(/No such endpoint/) } });
+    }
+  });
+
+  it("a method an endpoint does not answer is a JSON 405 with an Allow header", async () => {
+    const r = await call(at({ method: "DELETE", path: "/api/v1/quote" }));
+    expect(r).toMatchObject({ status: 405, isJson: true, body: { error: "DELETE is not allowed here. This endpoint answers POST, OPTIONS." } });
+    expect(r.headers.get("allow")).toBe("POST, OPTIONS");
+    expect((await get("/api/v1/orders")).status).toBe(405);
+  });
+
+  it("a path that is not valid percent-encoding is a JSON 400", async () => {
+    for (const path of ["/api/v1/events/%E0%A4%A", "/api/v1/%", "/api/v1/orders/%ZZ/cancel"]) {
+      expect(await get(path), path).toMatchObject({ status: 400, isJson: true, body: { error: "The URL is not valid percent-encoding." } });
+    }
+  });
+
+  it("OPTIONS lists the methods as JSON", async () => {
+    const r = await call(at({ method: "OPTIONS", path: "/api/v1/events/rockfest" }));
+    expect(r).toMatchObject({ status: 200, body: { allow: ["GET", "OPTIONS"] } });
   });
 });
 

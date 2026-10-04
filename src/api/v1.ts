@@ -16,7 +16,7 @@ import type { Db } from "../db/client";
 import { getEvent, listEvents, toDomainEvent } from "../db/events-repo";
 import type { EventRow, OrderRow } from "../db/schema";
 import { seatsAvailable } from "../domain/booking";
-import type { Invoice } from "../domain/invoice";
+import { earlyBirdEndsMs, type Invoice } from "../domain/invoice";
 import { resolveCaller } from "../mcp/caller";
 import { PaymentError, type PaymentProvider } from "../payments";
 import { cancelOwnOrder, OrderError, placeOrder, quoteOrder } from "../services/orders";
@@ -113,6 +113,8 @@ function eventJson(ev: EventRow, nowMs: number) {
     totalSeats: ev.totalSeats,
     seatsLeft: seatsAvailable(toDomainEvent(ev)),
     status: eventStatus(ev, nowMs),
+    /** the last instant a booking still gets the early-bird price */
+    earlyBirdEndsAt: iso(earlyBirdEndsMs({ startMs: ev.startsAtMs })),
   };
 }
 
@@ -151,7 +153,7 @@ function orderJson(o: OrderRow) {
 /** OrderError carries only its message; these two mean "no such thing (for you)". */
 const NOT_FOUND = new Set(["Event not found.", "Order not found."]);
 
-const error = (status: number, message: string, headers: Record<string, string> = {}) =>
+export const error = (status: number, message: string, headers: Record<string, string> = {}) =>
   Response.json({ error: message }, { status, headers });
 
 /** Runs a handler and turns every refusal into its 4xx; anything else is a logged 500. */

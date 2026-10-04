@@ -70,7 +70,7 @@ A small public JSON API under `/api/v1` (route handlers in `app/api/v1`, logic i
 
 | Endpoint | Auth | What it does |
 |---|---|---|
-| `GET /api/v1/events` | none | Every event: price in cents, seats left, status |
+| `GET /api/v1/events` | none | Every event: price in cents, seats left, status, when its early-bird ends |
 | `GET /api/v1/events/{id}` | none | One event, with its description |
 | `POST /api/v1/quote` | none | Body `{eventId, tickets, code?}` → the price breakdown. Books nothing |
 | `POST /api/v1/orders` | key, read & write | Same body, plus an `Idempotency-Key` header → books and pays. `201` new order, `200` replay of the same key |
@@ -78,7 +78,7 @@ A small public JSON API under `/api/v1` (route handlers in `app/api/v1`, logic i
 
 - **Auth:** the same API keys as the MCP server (**Settings → Developers**), sent as `Authorization: Bearer tb_…`. No key or a bad key → `401`; a read-only key → `403`.
 - **Money** is integer cents; times are ISO 8601. `tickets` is a whole number from 1 to 50.
-- **Errors** are JSON `{"error": "..."}`: `400` malformed request, `404` not found, `422` refused by a rule (sold out, sales closed, code expired, already refunded), `402` payment failed. A `500` never carries internal details.
+- **Every answer is JSON.** Errors are `{"error": "..."}`: `400` malformed request (or URL), `404` not found (an unknown path too), `405` a method the endpoint does not answer (with an `Allow` header; `OPTIONS` lists them), `422` refused by a rule (sold out, sales closed, code expired, already refunded), `402` payment failed. A `500` never carries internal details.
 - **Idempotency-Key:** 1-100 characters, one per purchase. Resend it only to retry the same purchase: you get the original order back and the card is charged once.
 
 ```bash
@@ -91,7 +91,12 @@ curl -X POST localhost:3000/api/v1/orders -H 'content-type: application/json' \
 curl -X POST localhost:3000/api/v1/orders/42/cancel -H "Authorization: Bearer $TICKETBAY_API_KEY"
 ```
 
-`tests/http/` tests it through the route handlers with real `Request`s against a real Postgres: the happy paths and auth, plus HTTP-level properties (fast-check) — never a 500 for any generated request, quote = order, one order per Idempotency-Key, and the refund rule on both sides of the event start.
+`tests/http/` tests it through the proxy and the route handlers with real `Request`s against a real Postgres: the happy paths and auth, plus four HTTP-level properties (fast-check, fixed seed, `FC_SEED=<n>` to explore):
+
+1. **Robustness:** any method, path, Content-Type, Accept, body and Authorization → a status below 500 and a JSON body.
+2. **Valid input → success:** every valid order is a `201` with the right price, including bookings at the early-bird boundary and across a daylight-saving change in Europe/Budapest.
+3. **Oracle:** a quote equals a simple price model written in the test.
+4. **Stateful:** random sequences of quotes, orders, retries, cancels and clock moves by three users keep seats, refunds, money and idempotency consistent after every step.
 
 `npm run db:up` starts Postgres 17 from `docker-compose.yml` (port 5432, named volume `ticketbay-pg`) and waits until it is healthy. Its local-only credentials and `DATABASE_URL` live in `.env.example`; the scripts read it when there is no `.env`. Copy it to `.env` to change anything. Port 5432 taken by another Postgres? Put `POSTGRES_PORT=5433` in `.env` and use the same port in its `DATABASE_URL`. `npm run db:down` stops the database; `docker compose down -v` also deletes its data.
 
