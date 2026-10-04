@@ -20,6 +20,7 @@ import { earlyBirdEndsMs, type Invoice } from "../domain/invoice";
 import { resolveCaller } from "../mcp/caller";
 import type { Caller } from "../mcp/tools";
 import { PaymentError, type PaymentProvider } from "../payments";
+import { invoiceExport } from "../finance/invoices";
 import { payoutReport } from "../finance/payouts";
 import { cancelOwnOrder, OrderError, placeOrder, quoteOrder } from "../services/orders";
 
@@ -271,5 +272,16 @@ export function organizerPayoutsEndpoint(deps: ApiDeps, request: Request): Promi
     const report = await payoutReport({ event, organizer, from: q.get("from"), to: q.get("to") });
     if (!report) throw new ApiError(404, "Event not found.");
     return Response.json(report);
+  });
+}
+
+/** GET /api/v1/organizer/invoices?month=YYYY-MM — optionally &event=… for one event. */
+export function organizerInvoicesEndpoint(deps: ApiDeps, request: Request): Promise<Response> {
+  return handle(request, async () => {
+    await keyHolder(deps, request);
+    const q = new URL(request.url).searchParams;
+    const event = q.get("event");
+    if (event !== null && !EventId.safeParse(event).success) throw new ApiError(404, "Event not found.");
+    return Response.json(await invoiceExport({ event, month: q.get("month") }));
   });
 }
