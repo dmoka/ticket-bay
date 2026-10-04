@@ -3,6 +3,7 @@ reports/
 .stryker-tmp/
 test-results/
 playwright-report/
+.playwright-mcp/
 coverage/
 .claude/worktrees/
 

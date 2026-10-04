@@ -11,6 +11,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
   iptables ipset iproute2 dnsutils aggregate jq nano curl ca-certificates \
   && apt-get clean && rm -rf /var/lib/apt/lists/*
 
+# Chromium's system libraries, so Playwright and Playwright MCP can run a browser in the box
+# (the node user has no apt). The browser itself downloads at run time; init-firewall.sh allows it.
+RUN npx --yes playwright@1.63.0 install-deps chromium \
+  && apt-get clean && rm -rf /var/lib/apt/lists/*
+
 RUN mkdir -p /usr/local/share/npm-global && chown -R node:node /usr/local/share
 
 # Persist bash history across rebuilds.
