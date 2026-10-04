@@ -16,7 +16,11 @@ Needs Node 22 (`nvm use` reads `.nvmrc`) and a running Docker.
 npm install && npm run db:up && npm run db:migrate && npm run db:seed && npm run dev
 ```
 
-**Working with an agent?** Run it inside the sandbox: `./box` starts a dev container that sees only this repo and a short network allowlist, then opens Claude Code in it (details in [`.devcontainer/README.md`](.devcontainer/README.md)).
+**Working with an agent?** Run it inside the sandbox: `./box` starts a dev container that sees only this repo and a short network allowlist, then opens Claude Code in it (details in [`.devcontainer/README.md`](.devcontainer/README.md)). The box has its own Postgres, so the same app runs in it without `db:up`:
+
+```bash
+./box npm ci && ./box npm run db:migrate && ./box npm run db:seed && ./box npm run dev
+```
 
 Then open http://localhost:3000 (storefront) and http://localhost:3000/admin (dashboard). The seed creates 8 events, ~300 orders over the last 60 days and two accounts, both with the password `ticketbay-demo`:
 
@@ -60,7 +64,7 @@ mcp_servers:
 
 Which clients accept a key header (and which would need OAuth): [`docs/mcp-client-auth-2026.md`](docs/mcp-client-auth-2026.md). The end-to-end proof: [`docs/mcp-e2e-2026.md`](docs/mcp-e2e-2026.md).
 
-`npm run db:up` starts Postgres 17 from `docker-compose.yml` (port 5432, named volume `ticketbay-pg`) and waits until it is healthy. Its local-only credentials and `DATABASE_URL` live in `.env.example`; the scripts read it when there is no `.env`. Copy it to `.env` to change anything. `npm run db:down` stops the database; `docker compose down -v` also deletes its data.
+`npm run db:up` starts Postgres 17 from `docker-compose.yml` (port 5432, named volume `ticketbay-pg`) and waits until it is healthy. Its local-only credentials and `DATABASE_URL` live in `.env.example`; the scripts read it when there is no `.env`. Copy it to `.env` to change anything. Port 5432 taken by another Postgres? Put `POSTGRES_PORT=5433` in `.env` and use the same port in its `DATABASE_URL`. `npm run db:down` stops the database; `docker compose down -v` also deletes its data.
 
 | Command | What it runs |
 |---|---|

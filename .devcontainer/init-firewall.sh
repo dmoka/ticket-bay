@@ -3,7 +3,7 @@
 # Based on Anthropic's reference init-firewall.sh:
 # https://github.com/anthropics/claude-code/blob/main/.devcontainer/init-firewall.sh (MIT)
 # Changes: DNS only to the container's own resolvers, no outbound SSH (git uses HTTPS),
-# Claude sign-in domains added, IPv6 egress dropped, npm registry verified.
+# Claude sign-in domains added, IPv6 egress dropped, npm registry verified, the box's Postgres allowed.
 set -euo pipefail
 IFS=$'\n\t'
 
@@ -64,6 +64,11 @@ HOST_NETWORK=$(echo "$HOST_IP" | sed "s/\.[0-9]*$/.0\/24/")
 iptables -A INPUT -s "$HOST_NETWORK" -j ACCEPT
 iptables -A OUTPUT -d "$HOST_NETWORK" -j ACCEPT
 
+# The box's own Postgres (the db service in compose.yaml): port 5432 only.
+DB_IP=$(getent ahostsv4 db | awk 'NR == 1 {print $1}')
+[ -n "$DB_IP" ] || { echo "ERROR: failed to resolve db"; exit 1; }
+iptables -A OUTPUT -p tcp -d "$DB_IP" --dport 5432 -j ACCEPT
+
 iptables -P INPUT DROP
 iptables -P FORWARD DROP
 iptables -P OUTPUT DROP
@@ -87,4 +92,5 @@ if curl --connect-timeout 5 -s https://example.com >/dev/null 2>&1; then
 fi
 curl --connect-timeout 5 -s https://api.github.com/zen >/dev/null || { echo "ERROR: api.github.com unreachable"; exit 1; }
 curl --connect-timeout 5 -s -o /dev/null https://registry.npmjs.org/ || { echo "ERROR: npm registry unreachable"; exit 1; }
-echo "Firewall OK: example.com blocked, GitHub and npm reachable."
+timeout 5 bash -c '</dev/tcp/db/5432' || { echo "ERROR: Postgres (db:5432) unreachable"; exit 1; }
+echo "Firewall OK: example.com blocked, GitHub, npm and Postgres (db:5432) reachable."

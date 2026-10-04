@@ -1,0 +1,44 @@
+# The box as two containers: `app` (the sandbox you work in) and `db` (its own
+# Postgres 17). The app reaches the database by name (db:5432); the database is
+# not published to your machine, so it never clashes with the one from `npm run db:up`.
+# The app's port 3000 is published on 127.0.0.1 only. Taken? BOX_PORT=3100 ./box
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        TZ: ${TZ:-Europe/Budapest}
+        CLAUDE_CODE_VERSION: "2.1.284"
+        GIT_DELTA_VERSION: "0.18.2"
+    # The firewall runs inside the container, so it needs these two capabilities.
+    cap_add: [NET_ADMIN, NET_RAW]
+    volumes:
+      - ..:/workspace:cached
+    environment:
+      DATABASE_URL: postgres://ticketbay:local-dev-only@db:5432/ticketbay
+      BETTER_AUTH_URL: http://localhost:${BOX_PORT:-3000}
+    ports:
+      - "127.0.0.1:${BOX_PORT:-3000}:3000"
+    command: sleep infinity
+    depends_on:
+      db:
+        condition: service_healthy
+
+  db:
+    image: postgres:17
+    # Local-only values, the same as .env.example. Never real secrets.
+    environment:
+      POSTGRES_USER: ticketbay
+      POSTGRES_PASSWORD: local-dev-only
+      POSTGRES_DB: ticketbay
+    volumes:
+      - pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ticketbay -d ticketbay"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+volumes:
+  pg:
