@@ -16,7 +16,7 @@ Needs Node 22 (`nvm use` reads `.nvmrc`) and a running Docker.
 npm install && npm run db:up && npm run db:migrate && npm run db:seed && npm run dev
 ```
 
-**Working with an agent?** Run it inside the sandbox: `./box` starts a dev container that sees only this repo and a short network allowlist, then opens Claude Code in it (details in [`.devcontainer/README.md`](.devcontainer/README.md)). The UI tests need Docker: `./box --docker` runs the box on its own engine, a VM that shares only this repo. The box has its own Postgres, so the same app runs in it without `db:up`:
+**Working with an agent?** Run it inside the sandbox: `./box` starts a dev container that sees only this repo, your second brain folder (module 5) and a short network allowlist, then opens Claude Code in it (details in [`.devcontainer/README.md`](.devcontainer/README.md)). The UI tests need Docker: `./box --docker` runs the box on its own engine, a VM that shares only this repo and the brain folder. The box has its own Postgres, so the same app runs in it without `db:up`:
 
 ```bash
 ./box npm ci && ./box npm run db:migrate && ./box npm run db:seed && ./box npm run dev
