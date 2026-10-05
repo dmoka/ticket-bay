@@ -7,7 +7,8 @@
   "service": "app",
   "runServices": ["app", "db"],
   // Refuses any engine but a Colima VM that shares only this repo (Docker Desktop shares your home).
-  "initializeCommand": "${localWorkspaceFolder}/.devcontainer/docker/check-engine.sh",
+  // Also creates the brain settings folder the box mounts read-only (compose.yaml).
+  "initializeCommand": "mkdir -p \"${BOX_BRAIN_CONFIG:-$HOME/.config/brain}\" && ${localWorkspaceFolder}/.devcontainer/docker/check-engine.sh",
   "customizations": {
     "vscode": {
       "extensions": ["anthropic.claude-code", "dbaeumer.vscode-eslint"]

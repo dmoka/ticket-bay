@@ -3,7 +3,8 @@
 #   ./box                  start the box if needed, then run Claude Code inside it
 #   ./box <command...>     run any command inside the box, e.g. ./box npm run test:unit
 #   ./box --docker [...]   the same box on its own Docker engine (a Colima VM that shares only
-#                          this repo), so Testcontainers and the UI tests run inside it
+#                          this repo, and your brain settings read-only), so Testcontainers and
+#                          the UI tests run inside it
 # Inside the box Claude Code runs with --dangerously-skip-permissions: the box is the safety
 # (only this repo, default-deny network). See .devcontainer/README.md for what it does not do.
 set -euo pipefail
@@ -17,11 +18,15 @@ if [ "${1:-}" = "--docker" ]; then
   repo_root="$(cd "$repo_root" && pwd -P)"   # the path the VM shares: no symlinks
   command -v colima >/dev/null || { echo "box --docker: needs Colima. Install it: brew install colima" >&2; exit 1; }
   profile="${BOX_DOCKER_PROFILE:-ticketbay-box}"
+  # The brain settings folder (module 5) the box mounts read-only: the VM shares it read-only too.
+  mkdir -p "${BOX_BRAIN_CONFIG:-$HOME/.config/brain}"
+  BOX_BRAIN_CONFIG="$(cd "${BOX_BRAIN_CONFIG:-$HOME/.config/brain}" && pwd -P)"
+  export BOX_BRAIN_CONFIG
   if ! colima status "$profile" >/dev/null 2>&1; then
-    echo "box: starting the Colima VM '$profile' (shares only $repo_root)..." >&2
+    echo "box: starting the Colima VM '$profile' (shares only $repo_root, and $BOX_BRAIN_CONFIG read-only)..." >&2
     # --activate=false and --ssh-config=false: your default Docker context and ~/.ssh/config stay as they are.
     if ! vm_log="$(colima start "$profile" --vm-type vz --cpus 4 --memory 4 --disk 40 \
-      --mount "$repo_root:w" --mount-inotify --activate=false --ssh-config=false 2>&1)"; then
+      --mount "$repo_root:w" --mount "$BOX_BRAIN_CONFIG" --mount-inotify --activate=false --ssh-config=false 2>&1)"; then
       echo "$vm_log" >&2
       echo "box: could not start the Colima VM (see the log above)." >&2
       exit 1

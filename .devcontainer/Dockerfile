@@ -23,7 +23,7 @@ RUN echo "export PROMPT_COMMAND='history -a' && export HISTFILE=/commandhistory/
 
 ENV DEVCONTAINER=true
 
-RUN mkdir -p /workspace /home/node/.claude /home/node/brain && chown -R node:node /workspace /home/node/.claude /home/node/brain
+RUN mkdir -p /workspace /home/node/.claude /home/node/brain /home/node/.config/brain && chown -R node:node /workspace /home/node/.claude /home/node/brain /home/node/.config
 WORKDIR /workspace
 
 ARG GIT_DELTA_VERSION=0.18.2
