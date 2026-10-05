@@ -20,6 +20,7 @@ export const E2E_EVENTS = {
   refundInWindow: "e2e-refund-in-window",
   refundAfterStart: "e2e-refund-after-start",
   adminCancel: "e2e-admin-cancel",
+  bookAndPay: "e2e-book-and-pay",
 } as const;
 
 export const E2E_CODE = { code: "WELCOME10", percent: 10 } as const;
@@ -45,4 +46,5 @@ export const E2E_USERS = {
   fanA: { name: "Ann Fan", email: "fan-a@e2e.test" },
   fanB: { name: "Bob Fan", email: "fan-b@e2e.test" },
   admin: { name: "Olga Admin", email: "admin@e2e.test", admin: true },
+  bookAndPay: { name: "Anna Fan", email: "book-and-pay@e2e.test" },
 } as const satisfies Record<string, E2EUser>;
