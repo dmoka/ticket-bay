@@ -35,7 +35,8 @@ const anOrder = (over: Partial<NewOrder> = {}): NewOrder => ({
   ...over,
 });
 
-const refund = { atMs: NOW, refundCents: 9_800, refundFeeCents: 200, seatsReleased: true };
+/** What the one winning refund below would pay out. */
+const PAYOUT_CENTS = 9_800;
 
 describe("orders round-trip (real Postgres)", () => {
   it("returns every money field exactly as stored, as numbers", async () => {
@@ -92,11 +93,6 @@ describe("the database refuses what the money path refuses (real Postgres)", () 
     await expect(raw(5150, "raw-2")).resolves.toBeDefined();
   });
 
-  it("refuses to record a refund larger than what was paid for the tickets", async () => {
-    const o = await insertOrder(t.db, anOrder());
-    expect((await pgError(markRefunded(t.db, o.id, { ...refund, refundCents: 10_001 }))).constraint).toBe("orders_refund_not_above_paid");
-    expect(await isRefunded(t.db, o.id)).toBe(false);
-  });
 
   it("refuses a zero or negative ticket count", async () => {
     expect((await pgError(insertOrder(t.db, anOrder({ quantity: 0 })))).constraint).toBe("orders_quantity_positive");
@@ -128,27 +124,27 @@ describe("marking an order refunded (real Postgres)", () => {
   it("succeeds the first time and refuses every later attempt", async () => {
     const o = await insertOrder(t.db, anOrder());
     expect(await isRefunded(t.db, o.id)).toBe(false);
-    expect(await markRefunded(t.db, o.id, refund)).toBe(true);
-    for (let i = 0; i < 3; i++) expect(await markRefunded(t.db, o.id, refund)).toBe(false);
+    expect(await markRefunded(t.db, o.id)).toBe(true);
+    for (let i = 0; i < 3; i++) expect(await markRefunded(t.db, o.id)).toBe(false);
     expect(await isRefunded(t.db, o.id)).toBe(true);
   });
 
-  it("does not disturb the stored order fields, and records the refund", async () => {
+  it("changes the status and nothing else (the amounts live in refunds)", async () => {
     const o = await insertOrder(t.db, anOrder());
-    await markRefunded(t.db, o.id, refund);
+    await markRefunded(t.db, o.id);
     const after = (await getOrder(t.db, o.id))!;
-    expect({ ...after, status: "paid", refundedAtMs: null, refundCents: null, refundFeeCents: null, seatsReleased: null, refundReason: null }).toEqual(o);
-    expect(after).toMatchObject({ status: "refunded", refundedAtMs: NOW, refundCents: 9_800, refundFeeCents: 200, seatsReleased: true, refundReason: "customer" });
+    expect({ ...after, status: "paid" }).toEqual(o);
+    expect(after.status).toBe("refunded");
   });
 
   it("refuses to refund an order that does not exist", async () => {
-    expect(await markRefunded(t.db, 424_242, refund)).toBe(false);
+    expect(await markRefunded(t.db, 424_242)).toBe(false);
   });
 
   it("refunds only the order asked for", async () => {
     const a = await insertOrder(t.db, anOrder());
     const b = await insertOrder(t.db, anOrder());
-    await markRefunded(t.db, a.id, refund);
+    await markRefunded(t.db, a.id);
     expect(await isRefunded(t.db, b.id)).toBe(false);
   });
 
@@ -156,13 +152,13 @@ describe("marking an order refunded (real Postgres)", () => {
     const o = await insertOrder(t.db, anOrder());
     await expect(
       t.db.transaction(async (tx) => {
-        expect(await markRefunded(tx, o.id, refund)).toBe(true);
+        expect(await markRefunded(tx, o.id)).toBe(true);
         throw new Error("payment provider down");
       }),
     ).rejects.toThrow("payment provider down");
     // The refund never committed, so no money moved — the order must still be refundable.
     expect(await isRefunded(t.db, o.id)).toBe(false);
-    expect(await markRefunded(t.db, o.id, refund)).toBe(true);
+    expect(await markRefunded(t.db, o.id)).toBe(true);
   });
 });
 
@@ -174,11 +170,11 @@ describe("two real connections racing for one refund (Postgres row locks)", () =
       const o = await insertOrder(a, anOrder());
       // Four concurrent UPDATEs over two pools: the first takes the row lock,
       // the rest wait for it, then re-check `status = 'paid'` and match nothing.
-      const wins = await Promise.all([a, b, a, b].map((conn) => markRefunded(conn, o.id, refund)));
+      const wins = await Promise.all([a, b, a, b].map((conn) => markRefunded(conn, o.id)));
       expect(wins.filter(Boolean)).toHaveLength(1);
       expect(await isRefunded(b, o.id)).toBe(true);
       // The payout decision follows the guard: exactly one refund is paid.
-      const paid = wins.reduce((s, won) => s + (won ? refund.refundCents : 0), 0);
+      const paid = wins.reduce((s, won) => s + (won ? PAYOUT_CENTS : 0), 0);
       expect(paid).toBe(9_800);
     } finally {
       await Promise.all([closeDb(a), closeDb(b)]);
@@ -196,7 +192,7 @@ describe("two real connections racing for one refund (Postgres row locks)", () =
       const aHasLock = new Promise<void>((r) => (locked = r));
       // A refunds inside a transaction and keeps it open...
       const first = a.transaction(async (tx) => {
-        const won = await markRefunded(tx, o.id, refund);
+        const won = await markRefunded(tx, o.id);
         locked();
         await held;
         return won;
@@ -205,7 +201,7 @@ describe("two real connections racing for one refund (Postgres row locks)", () =
       // ...B tries meanwhile. It must block on A's row lock — not read the
       // still-'paid' row and win a second payout.
       let bDone = false;
-      const second = markRefunded(b, o.id, refund).then((won) => {
+      const second = markRefunded(b, o.id).then((won) => {
         bDone = true;
         return won;
       });

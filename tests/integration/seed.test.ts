@@ -4,7 +4,7 @@
 // own Postgres database.
 import { execFileSync } from "node:child_process";
 import { describe, it, expect, beforeAll } from "vitest";
-import { discountCodes, events, orders, type DiscountCodeRow, type EventRow, type OrderRow } from "../../src/db/schema";
+import { discountCodes, events, orders, refunds, type DiscountCodeRow, type EventRow, type OrderRow, type RefundRow } from "../../src/db/schema";
 import { buildInvoice } from "../../src/domain/invoice";
 import { previewCancellation } from "../../src/domain/cancellation";
 import { useTestDatabase } from "./database";
@@ -13,12 +13,14 @@ const t = useTestDatabase({ truncate: false });
 let allEvents: EventRow[];
 let allOrders: OrderRow[];
 let allCodes: DiscountCodeRow[];
+let allRefunds: RefundRow[];
 
 beforeAll(async () => {
   execFileSync("npx", ["tsx", "scripts/seed.ts"], { env: { ...process.env, DATABASE_URL: t.url }, stdio: "pipe" });
   allEvents = await t.db.select().from(events);
   allOrders = await t.db.select().from(orders);
   allCodes = await t.db.select().from(discountCodes);
+  allRefunds = await t.db.select().from(refunds);
 }, 60_000);
 
 describe("db:seed", () => {
@@ -49,12 +51,15 @@ describe("db:seed", () => {
         o.codePercent,
       );
       expect(o).toMatchObject({ ticketsCents: inv.ticketsCents, feeCents: inv.feeCents, totalCents: inv.totalCents, vatCents: inv.vatCents });
-      if (o.status === "refunded") {
+      const mine = allRefunds.filter((r) => r.orderId === o.id);
+      // A seeded cancellation cancels the whole order, in one refund.
+      expect(mine).toHaveLength(o.status === "refunded" ? 1 : 0);
+      for (const r of mine) {
         const p = previewCancellation(
           { totalCents: o.ticketsCents, tickets: o.quantity, discountPercent: o.discountPercent, eventStartMs: e.startsAtMs },
-          o.refundedAtMs!,
+          r.createdAtMs,
         );
-        expect(o).toMatchObject({ refundCents: p.netCents, refundFeeCents: p.feeCents, seatsReleased: p.releasesSeats });
+        expect(r).toMatchObject({ tickets: o.quantity, grossCents: p.grossCents, netCents: p.netCents, feeCents: p.feeCents, seatsReleased: p.releasesSeats });
       }
     }
   });
@@ -62,7 +67,8 @@ describe("db:seed", () => {
   it("keeps every event's seat count equal to the seats its orders hold", () => {
     const held = new Map<string, number>();
     for (const o of allOrders) {
-      if (o.status === "paid" || o.seatsReleased === false) held.set(o.eventId, (held.get(o.eventId) ?? 0) + o.quantity);
+      const released = allRefunds.filter((r) => r.orderId === o.id && r.seatsReleased).reduce((n, r) => n + r.tickets, 0);
+      if (o.quantity > released) held.set(o.eventId, (held.get(o.eventId) ?? 0) + o.quantity - released);
     }
     for (const e of allEvents) expect(e.seatsSold).toBe(held.get(e.id) ?? 0);
     expect(allEvents.filter((e) => e.seatsSold === e.totalSeats).length).toBeGreaterThanOrEqual(1);

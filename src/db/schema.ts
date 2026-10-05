@@ -79,18 +79,25 @@ export const orders = pgTable(
     /** what was charged: ticketsCents + feeCents */
     totalCents: cents("total_cents").notNull(),
     vatCents: cents("vat_cents").notNull(),
+    /** "refunded" once every ticket is cancelled; an order with tickets left is "paid" (see `refunds`) */
     status: text("status", { enum: ["paid", "refunded"] }).notNull().default("paid"),
     paymentId: text("payment_id").notNull(),
     idempotencyKey: text("idempotency_key").notNull().unique(),
     createdAtMs: instant("created_at_ms").notNull(),
+    // The refund columns below are from when an order could only be refunded
+    // whole. Migration 0003 copied them into `refunds`; nothing reads or
+    // writes them any more, and a later migration drops them.
+    /** @deprecated read `refunds` */
     refundedAtMs: instant("refunded_at_ms"),
-    /** net amount returned to the customer */
+    /** @deprecated read `refunds` */
     refundCents: cents("refund_cents"),
-    /** fee kept by the platform on the refund */
+    /** @deprecated read `refunds` */
     refundFeeCents: cents("refund_fee_cents"),
+    /** @deprecated read `refunds` */
     seatsReleased: boolean("seats_released"),
+    /** @deprecated read `refunds` */
     refundId: text("refund_id"),
-    /** why it was refunded: the customer cancelled, or the organiser cancelled the event */
+    /** @deprecated read `refunds` */
     refundReason: text("refund_reason", { enum: ["customer", "event_cancelled"] }),
   },
   (t) => [
@@ -101,6 +108,53 @@ export const orders = pgTable(
     check("orders_quantity_positive", sql`${t.quantity} > 0`),
     check("orders_money_non_negative", sql`${t.ticketsCents} >= 0 AND ${t.totalCents} >= 0`),
     check("orders_refund_not_above_paid", sql`${t.refundCents} IS NULL OR ${t.refundCents} <= ${t.ticketsCents}`),
+  ],
+);
+
+/**
+ * One row per cancellation: a customer giving back some (or all) of an
+ * order's tickets, or the organiser cancelling the event. An order's refund
+ * totals are the sums over its rows. A trigger (migration 0003) refuses any
+ * row that would cancel more tickets than the order has, or take the gross
+ * refunded on the order above its `tickets_cents`.
+ */
+export const refunds = pgTable(
+  "refunds",
+  {
+    id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+    orderId: integer("order_id")
+      .notNull()
+      .references(() => orders.id),
+    /** tickets this cancellation gave back */
+    tickets: integer("tickets").notNull(),
+    /** this cancellation's share of the ticket money, before the fee */
+    grossCents: cents("gross_cents").notNull(),
+    /** refund fee kept by the platform */
+    feeCents: cents("fee_cents").notNull(),
+    /** what goes back to the customer: gross − fee */
+    netCents: cents("net_cents").notNull(),
+    /** the customer cancelled, or the organiser cancelled the event */
+    reason: text("reason", { enum: ["customer", "event_cancelled"] }).notNull(),
+    createdAtMs: instant("created_at_ms").notNull(),
+    /** false for a cancel after the event started: the seats stay taken */
+    seatsReleased: boolean("seats_released").notNull(),
+    /**
+     * One per cancellation, sent with the payout so a retry never pays twice.
+     * "cancel-…" is the key the customer's cancel request came with (a resend
+     * finds this row instead of cancelling again); the others are made here.
+     */
+    idempotencyKey: text("idempotency_key").notNull().unique(),
+    /** the payment provider's refund id; null until the payout went through (or when there is nothing to pay) */
+    providerRefundId: text("provider_refund_id"),
+  },
+  (t) => [
+    index("refunds_order_idx").on(t.orderId),
+    index("refunds_created_idx").on(t.createdAtMs),
+    check("refunds_tickets_positive", sql`${t.tickets} > 0`),
+    check(
+      "refunds_amounts_add_up",
+      sql`${t.grossCents} >= 0 AND ${t.feeCents} >= 0 AND ${t.netCents} >= 0 AND ${t.netCents} + ${t.feeCents} = ${t.grossCents}`,
+    ),
   ],
 );
 
@@ -134,6 +188,9 @@ export const voidedCharges = pgTable("voided_charges", {
 
 export type EventRow = typeof events.$inferSelect;
 export type NewEventRow = typeof events.$inferInsert;
-export type OrderRow = typeof orders.$inferSelect;
+/** The columns 0003 copied into `refunds`: kept out of the row type so nothing reads them by mistake. */
+type DeprecatedOrderColumns = "refundedAtMs" | "refundCents" | "refundFeeCents" | "seatsReleased" | "refundId" | "refundReason";
+export type OrderRow = Omit<typeof orders.$inferSelect, DeprecatedOrderColumns>;
+export type RefundRow = typeof refunds.$inferSelect;
 export type DiscountCodeRow = typeof discountCodes.$inferSelect;
 export type UserRow = typeof user.$inferSelect;

@@ -3,6 +3,7 @@ import { getDb } from "@/src/db/client";
 import { listOrdersAdmin, type OrderSort } from "@/src/db/admin-queries";
 import { listEvents } from "@/src/db/events-repo";
 import { getOrderWithEvent } from "@/src/db/orders-repo";
+import { listRefundsForOrder } from "@/src/db/refunds-repo";
 import { num } from "@/lib/format";
 import { Mono, PageHeader } from "@/components/app/primitives";
 import { OrderFilters } from "./filters";
@@ -29,7 +30,8 @@ export default async function AdminOrders({ searchParams }: { searchParams: Prom
     offset: (page - 1) * PAGE_SIZE,
   });
   const peekId = Number(sp.peek);
-  const peek = Number.isSafeInteger(peekId) && peekId > 0 ? ((await getOrderWithEvent(db, peekId)) ?? null) : null;
+  const peekOrder = Number.isSafeInteger(peekId) && peekId > 0 && peekId <= 2_147_483_647 ? await getOrderWithEvent(db, peekId) : undefined;
+  const peek = peekOrder ? { ...peekOrder, refunds: await listRefundsForOrder(db, peekId) } : null;
   const events = (await listEvents(db)).map((e) => ({ id: e.id, name: e.name }));
   const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const link = (p: number) => {

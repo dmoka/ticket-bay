@@ -38,6 +38,7 @@ export default defineConfig({
     // Starting a container and cloning a database can take a few seconds on a
     // cold Docker; the default 10s hook timeout is too tight for that.
     hookTimeout: 60_000,
+    testTimeout: 30_000,
     exclude,
   },
   resolve: { alias },

@@ -28,7 +28,7 @@ import fc from "fast-check";
 import { sql } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
 import { createEvent } from "../../src/db/events-repo";
-import { discountCodes, events, orders, user } from "../../src/db/schema";
+import { discountCodes, events, orders, user, refunds } from "../../src/db/schema";
 import { createTicketBayServer, orderNumber, type Caller } from "../../src/mcp/tools";
 import { createFakeStripe } from "../../src/payments";
 import { useTestDatabase } from "./database";
@@ -79,7 +79,7 @@ const body = (r: ToolResult): any => {
 };
 
 async function reset() {
-  await t.db.execute(sql`TRUNCATE ${orders}, ${discountCodes}, ${events} RESTART IDENTITY`);
+  await t.db.execute(sql`TRUNCATE ${refunds}, ${orders}, ${discountCodes}, ${events} RESTART IDENTITY`);
 }
 
 // ---- Generators: instants that sit on the edges that matter. --------------------
@@ -411,7 +411,7 @@ describe("my_orders refund_breakdown and refund_order", () => {
 
           const id: number = booked.order_id;
           const spellings: (string | number)[] = [id, String(id), orderNumber(id), orderNumber(id).toLowerCase(), `TB-${id}`, `000${id}`];
-          const r = body(await call("refund_order", { order_id: spellings[spelling % spellings.length] }));
+          const r = body(await call("refund_order", { order_id: spellings[spelling % spellings.length], tickets: booked.tickets, idempotency_key: crypto.randomUUID() }));
 
           expect(r.order_id).toBe(id);
           expect(cents(r.refunded_eur)).toBe(cents(promised.refund_if_cancelled_now_eur));
@@ -452,7 +452,7 @@ describe("my_orders refund_breakdown and refund_order", () => {
 
       await fc.assert(
         fc.asyncProperty(orderId, async (id) => {
-          const r = await call("refund_order", { order_id: id });
+          const r = await call("refund_order", { order_id: id, tickets: 1, idempotency_key: crypto.randomUUID() });
           expect(r.isError).toBe(true);
           expect(r.content[0].text).toBe("Order not found.");
         }),

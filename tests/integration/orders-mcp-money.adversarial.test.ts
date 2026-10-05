@@ -6,12 +6,11 @@ import { randomUUID } from "node:crypto";
 import { describe, it, expect } from "vitest";
 import { sql } from "drizzle-orm";
 import { getEvent } from "../../src/db/events-repo";
-import { getOrder } from "../../src/db/orders-repo";
 import { user } from "../../src/db/schema";
 import { createFakeStripe, type PaymentProvider } from "../../src/payments";
 import { cancelEvent, cancelOwnOrder, OrderError, placeOrder, type Deps } from "../../src/services/orders";
 import { useTestDatabase } from "./database";
-import { DAY, HOUR, NOW, venue } from "./fixtures";
+import { DAY, HOUR, NOW, venue, getOrderRefunded } from "./fixtures";
 
 /**
  * Charges complete together once `n` are in flight — or after `ms`, whichever
@@ -151,7 +150,7 @@ describe("ADVERSARIAL cancelOwnOrder: another customer's order is never reachabl
     }
     // An empty-string user id must not match a null owner.
     expect(await refusal(cancelOwnOrder(deps(payments), "", legacy.id))).toBe("Order not found.");
-    expect((await getOrder(t.db, order.id))!.status).toBe("paid");
+    expect((await getOrderRefunded(t.db, order.id))!.status).toBe("paid");
     expect(payments.getCharge(order.paymentId)!.refundedCents).toBe(0);
   });
 });
@@ -166,7 +165,7 @@ describe("ADVERSARIAL cancelEvent: refund everyone, exactly once, only when it m
     });
     // The show happened yesterday.
     await refusal(cancelEvent(deps(payments, ev.startsAtMs + DAY), ev.id));
-    expect((await getOrder(t.db, order.id))!.status).toBe("paid");
+    expect((await getOrderRefunded(t.db, order.id))!.status).toBe("paid");
     expect(payments.getCharge(order.paymentId)!.refundedCents).toBe(0);
   });
 
@@ -236,7 +235,7 @@ describe("ADVERSARIAL cancelEvent: refund everyone, exactly once, only when it m
     const results = await Promise.allSettled([cancelEvent(deps(payments), ev.id), cancelOwnOrder(deps(payments), uid, order.id)]);
     // Retry whichever side lost (the service says "the caller can retry").
     if (results[0].status === "rejected") await cancelEvent(deps(payments), ev.id).catch(() => undefined);
-    const row = (await getOrder(t.db, order.id))!;
+    const row = (await getOrderRefunded(t.db, order.id))!;
     expect(row.status).toBe("refunded");
     const charge = payments.getCharge(order.paymentId)!;
     expect(charge.refundedCents).toBe(row.refundCents);

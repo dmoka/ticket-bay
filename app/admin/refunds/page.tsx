@@ -10,12 +10,12 @@ export const metadata = { title: "Refunds" };
 
 export default async function AdminRefunds() {
   const rows = await listRefunds(getDb());
-  const refunded = rows.reduce((s, r) => s + (r.order.refundCents ?? 0), 0);
-  const fees = rows.reduce((s, r) => s + (r.order.refundFeeCents ?? 0), 0);
-  const late = rows.filter((r) => !r.order.seatsReleased).length;
+  const refunded = rows.reduce((s, r) => s + r.refund.netCents, 0);
+  const fees = rows.reduce((s, r) => s + r.refund.feeCents, 0);
+  const late = rows.filter((r) => !r.refund.seatsReleased).length;
 
   const stats = [
-    { label: "Refunded orders", value: num(rows.length) },
+    { label: "Cancellations", value: num(rows.length), sub: "a partial cancel counts once per cancel" },
     { label: "Paid back", value: money(refunded) },
     { label: "Refund fees kept", value: money(fees) },
     { label: "Late cancellations", value: num(late), sub: "after event start — €0 back, seats kept" },
@@ -23,7 +23,7 @@ export default async function AdminRefunds() {
 
   return (
     <>
-      <PageHeader title="Refunds" description="Every cancellation, the amount the refund module paid back, and what happened to the seats." />
+      <PageHeader title="Refunds" description="Every cancellation — whole orders and partial ones — the amount the refund module paid back, and what happened to the seats." />
       <div className="surface mb-5 grid grid-cols-4 divide-x divide-border">
         {stats.map((s) => (
           <div key={s.label} className="px-4 py-3">
@@ -48,8 +48,8 @@ export default async function AdminRefunds() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {rows.map(({ order: o, event: e }) => (
-              <TableRow key={o.id} className="border-border-subtle text-[13px]">
+            {rows.map(({ refund: r, order: o, event: e }) => (
+              <TableRow key={r.id} className="border-border-subtle text-[13px]">
                 <TableCell className="px-3 py-1.5">
                   <Link href={`/admin/orders?peek=${o.id}`} className="font-mono hover:underline">
                     {orderNumber(o.id)}
@@ -61,22 +61,24 @@ export default async function AdminRefunds() {
                 </TableCell>
                 <TableCell className="max-w-56 truncate py-1.5">{e.name}</TableCell>
                 <TableCell className="py-1.5">
-                  <Mono className="text-muted-foreground">{dateTime(o.refundedAtMs ?? 0)}</Mono>
+                  <Mono className="text-muted-foreground">{dateTime(r.createdAtMs)}</Mono>
                 </TableCell>
                 <TableCell className="py-1.5 text-right">
-                  <Mono>{o.quantity}</Mono>
+                  <Mono>
+                    {r.tickets === o.quantity ? r.tickets : `${r.tickets} of ${o.quantity}`}
+                  </Mono>
                 </TableCell>
                 <TableCell className="py-1.5 text-right">
                   <Mono className="text-muted-foreground">{money(o.totalCents)}</Mono>
                 </TableCell>
                 <TableCell className="py-1.5 text-right">
-                  <Mono className={(o.refundCents ?? 0) === 0 ? "text-negative" : ""}>{money(o.refundCents ?? 0)}</Mono>
+                  <Mono className={r.netCents === 0 ? "text-negative" : ""}>{money(r.netCents)}</Mono>
                 </TableCell>
                 <TableCell className="py-1.5 text-right">
-                  <Mono className="text-muted-foreground">{money(o.refundFeeCents ?? 0)}</Mono>
+                  <Mono className="text-muted-foreground">{money(r.feeCents)}</Mono>
                 </TableCell>
                 <TableCell className="px-3 py-1.5">
-                  {o.seatsReleased ? (
+                  {r.seatsReleased ? (
                     <span className="text-[12px]">Released</span>
                   ) : (
                     <span className="text-[12px] text-muted-foreground">Kept (late)</span>

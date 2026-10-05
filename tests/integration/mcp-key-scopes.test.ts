@@ -97,7 +97,7 @@ describe("a read-only key", () => {
 
     for (const [tool, args] of [
       ["book_tickets", { event_id: ev.id, quantity: 1 }],
-      ["refund_order", { order_id: booked.order_id }],
+      ["refund_order", { order_id: booked.order_id, tickets: 1, idempotency_key: crypto.randomUUID() }],
       ["cancel_event", { event_id: ev.id }],
     ] as const) {
       const r = toolResult(await call(tool, args, bearer(ro.key)));
@@ -130,7 +130,7 @@ describe("a read & write key", () => {
     const ev = await upcoming(t.db);
     const booked = await bookWith(rw.key, ev.id, 2);
     expect((await getOrder(t.db, booked.order_id))!.userId).toBe(anna.id);
-    const refund = toolResult(await call("refund_order", { order_id: booked.order_id }, bearer(rw.key)));
+    const refund = toolResult(await call("refund_order", { order_id: booked.order_id, tickets: 2, idempotency_key: crypto.randomUUID() }, bearer(rw.key)));
     expect(refund.isError, refund.text).toBe(false);
     expect((await getOrder(t.db, booked.order_id))!.status).toBe("refunded");
   });
@@ -246,12 +246,12 @@ describe("search_docs (public)", () => {
     const anna = await customer(auth, "Anna");
     const ev = await venue(t.db, { startsAtMs: Date.now() + 60 * DAY, createdAtMs: Date.now() - DAY });
     const one = await bookWith(anna.key, ev.id, 1);
-    const r1 = toolResult(await call("refund_order", { order_id: one.order_id }, bearer(anna.key)));
+    const r1 = toolResult(await call("refund_order", { order_id: one.order_id, tickets: 1, idempotency_key: crypto.randomUUID() }, bearer(anna.key)));
     expect(r1.data.refunded_eur).toBe(44.1);
     // "How refunds work": 2 tickets, €90.00 + €2.70 service fee, refund €88.20.
     const two = await bookWith(anna.key, ev.id, 2);
     expect((await getOrder(t.db, two.order_id))!).toMatchObject({ ticketsCents: 9000, feeCents: 270, totalCents: 9270 });
-    const r2 = toolResult(await call("refund_order", { order_id: two.order_id }, bearer(anna.key)));
+    const r2 = toolResult(await call("refund_order", { order_id: two.order_id, tickets: 2, idempotency_key: crypto.randomUUID() }, bearer(anna.key)));
     expect(r2.data.refunded_eur).toBe(88.2);
   });
 

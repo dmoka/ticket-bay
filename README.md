@@ -48,7 +48,7 @@ claude mcp add ticketbay-local -- npx tsx "$PWD/mcp/server.ts"
 claude mcp add --transport http ticketbay http://localhost:3000/api/mcp --header "Authorization: Bearer tb_…"
 ```
 
-Without a key the public tools still work; a private tool answers `401` and says how to get a key. A read-only key can see your orders but is refused (`403`) on booking and refunds. `search_docs` answers policy questions from the help pages in [`help/`](help/). Dangerous actions only return a link: `cancel_event` points an admin at `/admin/events/<id>/cancel`, and nothing is cancelled until they confirm there.
+Without a key the public tools still work; a private tool answers `401` and says how to get a key. A read-only key can see your orders but is refused (`403`) on booking and refunds. `refund_order` cancels some or all of an order's tickets; it requires `tickets` and an `idempotency_key`, and the same key sent twice returns the first refund and cancels nothing more. `search_docs` answers policy questions from the help pages in [`help/`](help/). Dangerous actions only return a link: `cancel_event` points an admin at `/admin/events/<id>/cancel`, and nothing is cancelled until they confirm there.
 
 Self-hosted agents take the key the same way. [Hermes](https://github.com/NousResearch/hermes-agent), in `~/.hermes/config.yaml` with `TICKETBAY_API_KEY=tb_…` in `~/.hermes/.env`:
 
@@ -74,12 +74,14 @@ A small public JSON API under `/api/v1` (route handlers in `app/api/v1`, logic i
 | `GET /api/v1/events/{id}` | none | One event, with its description |
 | `POST /api/v1/quote` | none | Body `{eventId, tickets, code?}` → the price breakdown. Books nothing |
 | `POST /api/v1/orders` | key, read & write | Same body, plus an `Idempotency-Key` header → books and pays. `201` new order, `200` replay of the same key |
-| `POST /api/v1/orders/{id}/cancel` | key, read & write | Cancels one of **your** orders → the refund. Someone else's order is `404 Order not found.` |
+| `POST /api/v1/orders/{id}/cancel` | key, read & write | Body `{tickets?}` (empty: every ticket left) → cancels that many tickets on one of **your** orders and returns this refund plus the order. Cancel again to cancel more, until none are left or the event starts; after the start only every ticket left can be cancelled (refund 0, seats kept) and a smaller count is `422`. With `tickets`, an `Idempotency-Key` header is required (`400` without); `replayed: true` marks a resend of the same key. Someone else's order is `404 Order not found.` |
+| `GET /api/v1/orders/{id}/cancel-quote?tickets=N` | key, read is enough | What that cancel would pay right now (`N` defaults to every ticket left). Changes nothing |
 
 - **Auth:** the same API keys as the MCP server (**Settings → Developers**), sent as `Authorization: Bearer tb_…`. No key or a bad key → `401`; a read-only key → `403`.
 - **Money** is integer cents; times are ISO 8601. `tickets` is a whole number from 1 to 50.
 - **Every answer is JSON.** Errors are `{"error": "..."}`: `400` malformed request (or URL), `404` not found (an unknown path too), `405` a method the endpoint does not answer (with an `Allow` header; `OPTIONS` lists them), `422` refused by a rule (sold out, sales closed, code expired, already refunded), `402` payment failed. A `500` never carries internal details.
-- **Idempotency-Key:** 1-100 characters, one per purchase. Resend it only to retry the same purchase: you get the original order back and the card is charged once.
+- **Orders** carry their refunds: `refundCents` and `refundedAt` are totals over every cancellation so far (`null` before the first), `ticketsCancelled` counts the tickets given back, and `refunds[]` lists each cancellation. `status` turns `refunded` once no tickets are left.
+- **Idempotency-Key:** 1-100 characters, one per purchase. Resend it only to retry the same purchase: you get the original order back and the card is charged once. A cancel takes one too — one per cancellation, required whenever the body has `tickets`: resend it and you get the first cancellation back (`replayed: true`) and nothing more is cancelled; the same key for a different order or count is `422`. The key is stored with the refund row. The MCP tool `refund_order` requires `idempotency_key` the same way, and the order page's form sends one by itself.
 
 ```bash
 curl localhost:3000/api/v1/events
@@ -88,7 +90,9 @@ curl -X POST localhost:3000/api/v1/quote -H 'content-type: application/json' \
 curl -X POST localhost:3000/api/v1/orders -H 'content-type: application/json' \
   -H "Authorization: Bearer $TICKETBAY_API_KEY" -H "Idempotency-Key: $(uuidgen)" \
   -d '{"eventId": "midnight-arcade-neon-tour", "tickets": 2}'
-curl -X POST localhost:3000/api/v1/orders/42/cancel -H "Authorization: Bearer $TICKETBAY_API_KEY"
+curl "localhost:3000/api/v1/orders/42/cancel-quote?tickets=1" -H "Authorization: Bearer $TICKETBAY_API_KEY"
+curl -X POST localhost:3000/api/v1/orders/42/cancel -H "Authorization: Bearer $TICKETBAY_API_KEY" \
+  -H "Idempotency-Key: $(uuidgen)" -H 'content-type: application/json' -d '{"tickets": 1}'
 ```
 
 `tests/http/` tests it through the proxy and the route handlers with real `Request`s against a real Postgres: the happy paths and auth, plus four HTTP-level properties (fast-check, fixed seed, `FC_SEED=<n>` to explore):

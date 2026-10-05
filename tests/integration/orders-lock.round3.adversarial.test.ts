@@ -5,12 +5,11 @@
 import { randomUUID } from "node:crypto";
 import { describe, it, expect } from "vitest";
 import { sql } from "drizzle-orm";
-import { getOrder } from "../../src/db/orders-repo";
 import { user } from "../../src/db/schema";
 import { createFakeStripe, type PaymentProvider } from "../../src/payments";
 import { cancelEvent, cancelOwnOrder, OrderError, placeOrder, type Deps } from "../../src/services/orders";
 import { useTestDatabase } from "./database";
-import { NOW, venue } from "./fixtures";
+import { NOW, venue, getOrderRefunded } from "./fixtures";
 
 const t = useTestDatabase();
 const deps = (payments: PaymentProvider, nowMs = NOW): Deps => ({ db: t.db, payments, nowMs });
@@ -183,7 +182,7 @@ describe("ADVERSARIAL round 3: the customer refund resume path", () => {
     await expect(cancelOwnOrder(deps(flaky), uid, order.id)).rejects.toThrow();
     down = false;
     await Promise.allSettled([1, 2, 3, 4].map(() => cancelOwnOrder(deps(flaky), uid, order.id)));
-    const row = (await getOrder(t.db, order.id))!;
+    const row = (await getOrderRefunded(t.db, order.id))!;
     expect(inner.getCharge(order.paymentId)!.refundedCents).toBe(row.refundCents);
     // a resumed refund must not release seats a second time
     const ev2 = await t.db.execute(sql`SELECT seats_sold FROM events WHERE id = ${ev.id}`);

@@ -26,11 +26,11 @@ import { sql } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
 import { cancelImpact } from "../../src/db/admin-queries";
 import { createEvent, getEvent } from "../../src/db/events-repo";
-import { getOrder } from "../../src/db/orders-repo";
-import { discountCodes, events, orders } from "../../src/db/schema";
+import { discountCodes, events, orders, refunds } from "../../src/db/schema";
 import { createFakeStripe, PaymentError, type PaymentProvider } from "../../src/payments";
 import { cancelEvent, cancelOrder, OrderError, placeOrder, quoteOrder } from "../../src/services/orders";
 import { useTestDatabase } from "./database";
+import { getOrderRefunded } from "./fixtures";
 
 const t = useTestDatabase();
 
@@ -73,7 +73,7 @@ const STARTS_AT = BASE + 70 * DAY;
  * after the last booking (still before the start) so the timeline is real.
  */
 async function arrange(s: Scenario, payments: PaymentProvider, cancelAtWanted: number) {
-  await t.db.execute(sql`TRUNCATE ${orders}, ${discountCodes}, ${events} RESTART IDENTITY`);
+  await t.db.execute(sql`TRUNCATE ${refunds}, ${orders}, ${discountCodes}, ${events} RESTART IDENTITY`);
   await createEvent(t.db, {
     id: "ev",
     name: "Prop Night",
@@ -105,7 +105,7 @@ async function arrange(s: Scenario, payments: PaymentProvider, cancelAtWanted: n
     .filter((x) => x.when <= cancelAt)
     .sort((a, b) => a.when - b.when);
   for (const x of selfRefunds) await cancelOrder({ db: t.db, payments, nowMs: x.when }, x.id);
-  const before = await Promise.all(made.map((m) => getOrder(t.db, m.id).then((o) => o!)));
+  const before = await Promise.all(made.map((m) => getOrderRefunded(t.db, m.id).then((o) => o!)));
   return { cancelAt, before, paid: before.filter((o) => o.status === "paid") };
 }
 
@@ -136,7 +136,7 @@ describe("cancelEvent", () => {
           expect(r.event.seatsSold).toBeGreaterThanOrEqual(s.seatsAlreadySold);
 
           for (const was of before) {
-            const now = (await getOrder(t.db, was.id))!;
+            const now = (await getOrderRefunded(t.db, was.id))!;
             const charge = payments.getCharge(was.paymentId)!;
             // 2. never above what was paid
             expect(now.refundCents!).toBeLessThanOrEqual(now.ticketsCents);
@@ -161,7 +161,7 @@ describe("cancelEvent", () => {
 
           // 6. once only; the event is closed
           await expect(cancelEvent({ db: t.db, payments, nowMs: cancelAt + 1 }, "ev")).rejects.toBeInstanceOf(OrderError);
-          for (const was of before) expect(payments.getCharge(was.paymentId)!.refundedCents).toBe((await getOrder(t.db, was.id))!.refundCents);
+          for (const was of before) expect(payments.getCharge(was.paymentId)!.refundedCents).toBe((await getOrderRefunded(t.db, was.id))!.refundCents);
           await expect(quoteOrder({ db: t.db, nowMs: cancelAt + 1 }, "ev", 1)).rejects.toBeInstanceOf(OrderError);
           await expect(
             placeOrder({ db: t.db, payments, nowMs: cancelAt + 1 }, { eventId: "ev", quantity: 1, email: "late@example.com", name: "Late", idempotencyKey: "late" }),
@@ -191,7 +191,7 @@ describe("cancelEvent", () => {
             expect(await getEvent(t.db, "ev")).toEqual(evBefore);
             expect(evBefore.cancelledAtMs).toBeNull();
             for (const [i, was] of before.entries()) {
-              expect(await getOrder(t.db, was.id)).toEqual(was);
+              expect(await getOrderRefunded(t.db, was.id)).toEqual(was);
               expect(payments.getCharge(was.paymentId)!.refundedCents).toBe(refundedBefore[i]);
             }
           },
@@ -239,7 +239,7 @@ describe("cancelEvent", () => {
             expect(result!.refundedOrders).toBe(paid.length);
             expect(result!.refundedCents).toBe(paid.reduce((n, o) => n + o.ticketsCents, 0));
             for (const was of before) {
-              const now = (await getOrder(t.db, was.id))!;
+              const now = (await getOrderRefunded(t.db, was.id))!;
               const charge = inner.getCharge(was.paymentId)!;
               if (was.status === "paid") {
                 expect(now.refundCents).toBe(was.ticketsCents);

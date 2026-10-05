@@ -3,7 +3,7 @@
 // clock, tests call them with any clock they like.
 import { randomUUID } from "node:crypto";
 import { bookTickets, seatsAvailable } from "../domain/booking";
-import { previewCancellation } from "../domain/cancellation";
+import { eventCancellationRefund, PARTIAL_CANCEL_CLOSED, quoteCancellation, refundsSoFar, type CancellationQuote } from "../domain/cancellation";
 import { checkDiscountCode, normalizeCode, quote, type CodeCheck } from "../domain/pricing";
 import type { Invoice } from "../domain/invoice";
 import type { Db } from "../db/client";
@@ -15,16 +15,25 @@ import {
   getOrder,
   getOrderByIdempotencyKey,
   isOrderId,
-  listCancelRefunds,
   listPaidOrdersForUpdate,
-  listUnpaidCancelRefunds,
   getOrderWithEvent,
+  getOrderWithEventForUpdate,
   insertOrder,
   markRefunded,
-  setRefundId,
   toDomainOrder,
 } from "../db/orders-repo";
-import type { EventRow, OrderRow } from "../db/schema";
+import {
+  getRefundByIdempotencyKey,
+  insertRefund,
+  listEventCancelRefunds,
+  listRefundsForOrder,
+  listRefundsForOrders,
+  listUnpaidCustomerRefunds,
+  listUnpaidEventCancelRefunds,
+  owed,
+  setProviderRefundId,
+} from "../db/refunds-repo";
+import type { EventRow, OrderRow, RefundRow } from "../db/schema";
 import type { PaymentProvider } from "../payments";
 
 export interface Deps {
@@ -36,8 +45,8 @@ export interface Deps {
 
 /**
  * Run a transaction, re-running it when Postgres aborts it to break a deadlock
- * (SQLSTATE 40P01) — e.g. an event cancellation (event → orders) racing a
- * customer's refund (order → event). Each attempt re-reads its rows, so a
+ * (SQLSTATE 40P01). Cancels take event → order locks everywhere, so this is a
+ * safety net rather than the expected path. Each attempt re-reads its rows, so a
  * retry decides on the committed state; after the last attempt the caller
  * gets a readable refusal instead of a raw driver error.
  */
@@ -278,65 +287,173 @@ async function placeOrderOnce(deps: Deps, input: PlaceOrderInput): Promise<{ ord
 }
 
 export interface CancelResult {
+  /** the order after the cancel: "refunded" once no tickets are left */
   order: OrderRow;
+  /** this cancellation */
+  refund: RefundRow;
+  /** every refund of the order, this one included, oldest first */
+  refunds: RefundRow[];
+  /** this cancellation's figures, flat: tickets given back, net paid, fee kept */
+  tickets: number;
   refundCents: number;
   refundFeeCents: number;
   seatsReleased: boolean;
+  /** true when the idempotency key had already cancelled: `refund` is that first cancellation, nothing new */
+  replayed: boolean;
+}
+
+/** What a cancel would do right now, from the same domain function the cancel uses. */
+export interface CancelQuoteResult extends CancellationQuote {
+  order: OrderRow;
+  /** tickets on the order not cancelled yet, before this cancel */
+  ticketsLeft: number;
+}
+
+/** "This order has 3 tickets left: cancel 1 to 3." */
+function ticketsLeftMessage(left: number): string {
+  return left === 1 ? "This order has 1 ticket left: cancel 1." : `This order has ${left} tickets left: cancel 1 to ${left}.`;
 }
 
 /**
- * Cancel a whole order. Refund = the refund module's net amount on what was
- * paid for the tickets (the service fee is kept). Seats go back on sale only
- * while the refund window is open — after the event starts the customer is
- * paid nothing AND keeps the seat.
+ * Prices cancelling `tickets` (default: all that are left) of an order with
+ * this refund history. The one place both the quote and the cancel decide.
  */
-export async function cancelOrder(deps: Deps, orderId: number): Promise<CancelResult> {
+function priceCancel(found: { order: OrderRow; event: EventRow }, history: RefundRow[], tickets: number | undefined, nowMs: number) {
+  const soFar = refundsSoFar(history);
+  const ticketsLeft = found.order.quantity - soFar.ticketsCancelled;
+  if (ticketsLeft === 0) throw new OrderError("This order has already been refunded.");
+  const n = tickets ?? ticketsLeft;
+  if (!Number.isInteger(n) || n < 1 || n > ticketsLeft) throw new OrderError(ticketsLeftMessage(ticketsLeft));
+  try {
+    return { ticketsLeft, quote: quoteCancellation(toDomainOrder(found.order, found.event), soFar, n, nowMs) };
+  } catch (e) {
+    if (e instanceof RangeError && e.message === PARTIAL_CANCEL_CLOSED) {
+      const all = ticketsLeft === found.order.quantity ? "the whole order" : `all ${ticketsLeft} tickets left`;
+      throw new OrderError(`The event has started: you can no longer cancel only some of the tickets. You can still cancel ${all}, with no refund.`);
+    }
+    throw e;
+  }
+}
+
+/**
+ * What cancelling `tickets` of an order (default: every ticket left) would pay
+ * at `nowMs`. Reads only; the cancel itself re-decides under the order's lock.
+ */
+export async function quoteCancel(deps: Pick<Deps, "db" | "nowMs">, orderId: number, tickets?: number): Promise<CancelQuoteResult> {
+  const found = isOrderId(orderId) ? await getOrderWithEvent(deps.db, orderId) : undefined;
+  if (!found) throw new OrderError("Order not found.");
+  const { ticketsLeft, quote } = priceCancel(found, await listRefundsForOrder(deps.db, orderId), tickets, deps.nowMs);
+  return { ...quote, order: found.order, ticketsLeft };
+}
+
+/** quoteCancel for one account: someone else's order is "not found". */
+export async function quoteOwnCancel(deps: Pick<Deps, "db" | "nowMs">, userId: string, orderId: number, tickets?: number): Promise<CancelQuoteResult> {
+  const found = isOrderId(orderId) ? await getOrder(deps.db, orderId) : undefined;
+  if (!found || found.userId !== userId) throw new OrderError("Order not found.");
+  return quoteCancel(deps, orderId, tickets);
+}
+
+/** The refunds table's key of a cancel that came with the caller's idempotency key. */
+const cancelKey = (idempotencyKey: string) => `cancel-${idempotencyKey}`;
+
+const KEY_USED_ELSEWHERE = "This idempotency key was already used for a different cancellation. Use a new key for a new cancellation.";
+
+/**
+ * Cancel `tickets` of an order (default: every ticket left), as many times as
+ * the customer likes until none are left or the event starts. Each cancel is
+ * its own refund row, priced on running totals (quoteCancellation), so any
+ * sequence of partial cancels nets what one whole-order cancel would. The
+ * service fee is kept. After the event starts only a full cancel is left: the
+ * customer is paid nothing AND keeps the seats.
+ *
+ * `idempotencyKey` (already namespaced per caller, like placeOrder's) makes a
+ * resend safe: it is stored with the refund row, and a second cancel with the
+ * same key returns the first one's refund and cancels nothing more.
+ */
+export async function cancelOrder(deps: Deps, orderId: number, tickets?: number, idempotencyKey?: string): Promise<CancelResult> {
   const { db, payments, nowMs } = deps;
-  const result = await withDeadlockRetry(() => db.transaction(async (tx) => {
-    const found = await getOrderWithEvent(tx, orderId);
-    if (!found) throw new OrderError("Order not found.");
-    if (found.order.status === "refunded") {
-      // Refunded in our books but the payout never reached the provider (it
-      // failed last time): pay it now instead of refusing. The refund's
-      // idempotency key makes this safe to run any number of times.
-      const o = found.order;
-      if (o.refundReason !== "event_cancelled" && o.refundId === null && (o.refundCents ?? 0) > 0) {
-        return { paymentId: o.paymentId, resume: { refundCents: o.refundCents!, refundFeeCents: o.refundFeeCents ?? 0, seatsReleased: o.seatsReleased ?? false } };
+  const decided = await withDeadlockRetry(() => db.transaction(async (tx) => {
+    // Event first, then the order: the lock order of cancelEvent and of every
+    // checkout, so a customer's cancel queues behind an event cancellation
+    // instead of deadlocking with it. (An order never changes event.)
+    const placed = isOrderId(orderId) ? await getOrder(tx, orderId) : undefined;
+    if (!placed) throw new OrderError("Order not found.");
+    await getEventForUpdate(tx, placed.eventId);
+    // The order lock serialises every cancel of this order: each prices itself on the refunds committed before it.
+    const found = (await getOrderWithEventForUpdate(tx, orderId))!;
+    if (idempotencyKey !== undefined) {
+      // Before every other rule: a resend gets the first answer even when a
+      // new cancel would be refused by now (nothing left, the event started).
+      const first = await getRefundByIdempotencyKey(tx, cancelKey(idempotencyKey));
+      if (first) {
+        if (first.orderId !== orderId || (tickets !== undefined && tickets !== first.tickets)) throw new OrderError(KEY_USED_ELSEWHERE);
+        return { refundId: first.id, paymentId: found.order.paymentId, replayed: true };
       }
+    }
+    const history = await listRefundsForOrder(tx, orderId);
+    if (found.order.status === "refunded") {
+      // Refunded in our books but a payout never reached the provider (it
+      // failed last time): pay it now instead of refusing. Each refund's
+      // idempotency key makes this safe to run any number of times.
+      const unpaid = history.filter((r) => r.reason === "customer" && owed(r));
+      if (unpaid.length > 0) return { refundId: unpaid.at(-1)!.id, paymentId: found.order.paymentId, replayed: false };
       throw new OrderError("This order has already been refunded.");
     }
-    const preview = previewCancellation(toDomainOrder(found.order, found.event), nowMs);
-    const won = await markRefunded(tx, orderId, {
-      atMs: nowMs,
-      refundCents: preview.netCents,
-      refundFeeCents: preview.feeCents,
-      seatsReleased: preview.releasesSeats,
+    const { ticketsLeft, quote } = priceCancel(found, history, tickets, nowMs);
+    const cancelledAfter = found.order.quantity - ticketsLeft + quote.tickets;
+    const refund = await insertRefund(tx, {
+      orderId,
+      tickets: quote.tickets,
+      grossCents: quote.grossCents,
+      feeCents: quote.feeCents,
+      netCents: quote.netCents,
+      reason: "customer",
+      createdAtMs: nowMs,
+      seatsReleased: quote.releasesSeats,
+      // The caller's key, or one unique per cancel: tickets cancelled so far only ever grows.
+      idempotencyKey: idempotencyKey !== undefined ? cancelKey(idempotencyKey) : `refund-${orderId}-${cancelledAfter}`,
     });
-    if (!won) throw new OrderError("This order has already been refunded.");
-    if (preview.releasesSeats) await adjustSeatsSold(tx, found.order.eventId, -found.order.quantity);
-    return {
-      paymentId: found.order.paymentId,
-      resume: { refundCents: preview.netCents, refundFeeCents: preview.feeCents, seatsReleased: preview.releasesSeats },
-    };
-  }));
+    if (quote.releasesSeats) await adjustSeatsSold(tx, found.order.eventId, -quote.tickets);
+    if (quote.tickets === ticketsLeft) await markRefunded(tx, orderId);
+    return { refundId: refund.id, paymentId: found.order.paymentId, replayed: false };
+  })).catch((e) => {
+    // The same key sent for two orders at the same moment: neither saw the
+    // other's row, and the unique key lets only one of them in.
+    const cause = (e as { cause?: { code?: string; constraint?: string } }).cause ?? (e as { code?: string; constraint?: string });
+    if (cause.code === "23505" && cause.constraint === "refunds_idempotency_key_unique") throw new OrderError(KEY_USED_ELSEWHERE);
+    throw e;
+  });
 
-  const { refundCents, refundFeeCents, seatsReleased } = result.resume;
-  if (refundCents > 0) {
-    const refund = await payments.refund(result.paymentId, refundCents, `refund-${orderId}`);
-    await setRefundId(db, orderId, refund.id);
+  // Pay out — outside the transaction, so a slow provider holds no
+  // connection. Every payout this order still owes the customer goes, not
+  // just this one: an earlier cancel whose payout failed is paid now too.
+  for (const r of await listUnpaidCustomerRefunds(db, orderId)) {
+    const paid = await payments.refund(decided.paymentId, r.netCents, r.idempotencyKey);
+    await setProviderRefundId(db, r.id, paid.id);
   }
-  const after = (await getOrderWithEvent(db, orderId))!;
-  return { order: after.order, refundCents, refundFeeCents, seatsReleased };
+  const order = (await getOrder(db, orderId))!;
+  const all = await listRefundsForOrder(db, orderId);
+  const refund = all.find((r) => r.id === decided.refundId)!;
+  return {
+    order,
+    refund,
+    refunds: all,
+    tickets: refund.tickets,
+    refundCents: refund.netCents,
+    refundFeeCents: refund.feeCents,
+    seatsReleased: refund.seatsReleased,
+    replayed: decided.replayed,
+  };
 }
 
 /**
  * Cancel an order on behalf of one account. Someone else's order is "not
  * found" — never "not yours" — so an order number leaks nothing.
  */
-export async function cancelOwnOrder(deps: Deps, userId: string, orderId: number): Promise<CancelResult> {
+export async function cancelOwnOrder(deps: Deps, userId: string, orderId: number, tickets?: number, idempotencyKey?: string): Promise<CancelResult> {
   const found = isOrderId(orderId) ? await getOrder(deps.db, orderId) : undefined;
   if (!found || found.userId !== userId) throw new OrderError("Order not found.");
-  return cancelOrder(deps, orderId);
+  return cancelOrder(deps, orderId, tickets, idempotencyKey);
 }
 
 export interface CancelEventResult {
@@ -346,37 +463,50 @@ export interface CancelEventResult {
 }
 
 /**
- * The organiser calls the event off: sales stop and every paid order gets its
- * whole ticket amount back — no refund fee, because the customer did nothing
- * wrong. (The service fee stays with the platform, as it does for every
- * refund; the schema caps a refund at the ticket amount.) Only before the
- * event starts: a show that happened is not refunded wholesale.
- * Admin-only — callers check the role.
+ * The organiser calls the event off: sales stop and every order with tickets
+ * left gets the ticket amount for those tickets back — no refund fee, because
+ * the customer did nothing wrong (eventCancellationRefund). Fees kept on
+ * earlier partial cancels stay kept, and the service fee stays with the
+ * platform, as it does for every refund. Only before the event starts: a show
+ * that happened is not refunded wholesale. Admin-only — callers check the role.
  *
- * Money moves in two phases. The transaction marks every order refunded and
+ * Money moves in two phases. The transaction writes every refund and marks
  * the event cancelled; then each payout goes to the provider. A payout that
- * fails leaves its order refunded-but-unpaid (no refund id) — calling
- * cancelEvent again on the cancelled event retries exactly those, and the
- * per-order idempotency key means nobody is paid twice.
+ * fails leaves its refund unpaid (no provider id) — calling cancelEvent again
+ * on the cancelled event retries exactly those, and the per-refund
+ * idempotency key means nobody is paid twice.
  */
 export async function cancelEvent(deps: Deps, eventId: string): Promise<CancelEventResult> {
   const { db, nowMs } = deps;
   await withDeadlockRetry(() => db.transaction(async (tx) => {
-    // Event lock first: no checkout can add a paid order behind our back. A
-    // customer refunding at the same moment locks order-then-event; Postgres
-    // detects that deadlock and aborts one side, and withDeadlockRetry re-runs it.
+    // Event lock first: no checkout can add a paid order behind our back, and a
+    // customer cancelling at the same moment waits for us (cancelOrder locks
+    // event-then-order too). withDeadlockRetry stays as the safety net.
     const ev = await getEventForUpdate(tx, eventId);
     if (!ev) throw new OrderError("Event not found.");
     if (ev.cancelledAtMs !== null) {
-      if ((await listUnpaidCancelRefunds(tx, eventId)).length === 0) throw new OrderError("This event is already cancelled.");
+      if ((await listUnpaidEventCancelRefunds(tx, eventId)).length === 0) throw new OrderError("This event is already cancelled.");
       return; // cancelled earlier, some payouts still owed: retry them below
     }
     if (nowMs >= ev.startsAtMs) throw new OrderError("This event has already started — it can no longer be cancelled.");
     await markEventCancelled(tx, eventId, nowMs);
-    for (const o of await listPaidOrdersForUpdate(tx, eventId)) {
-      const won = await markRefunded(tx, o.id, { reason: "event_cancelled", atMs: nowMs, refundCents: o.ticketsCents, refundFeeCents: 0, seatsReleased: true });
-      if (!won) throw new OrderError(`Order ${o.id} changed while cancelling. Try again.`);
-      await adjustSeatsSold(tx, eventId, -o.quantity);
+    const paid = await listPaidOrdersForUpdate(tx, eventId);
+    const histories = await listRefundsForOrders(tx, paid.map((o) => o.id));
+    for (const o of paid) {
+      const r = eventCancellationRefund(toDomainOrder(o, ev), refundsSoFar(histories.get(o.id)!));
+      await insertRefund(tx, {
+        orderId: o.id,
+        tickets: r.tickets,
+        grossCents: r.grossCents,
+        feeCents: r.feeCents,
+        netCents: r.netCents,
+        reason: "event_cancelled",
+        createdAtMs: nowMs,
+        seatsReleased: true,
+        idempotencyKey: `event-cancel-${o.id}`,
+      });
+      if (!(await markRefunded(tx, o.id))) throw new OrderError(`Order ${o.id} changed while cancelling. Try again.`);
+      await adjustSeatsSold(tx, eventId, -r.tickets);
     }
   }));
   return payCancelRefunds(deps, eventId);
@@ -385,19 +515,19 @@ export async function cancelEvent(deps: Deps, eventId: string): Promise<CancelEv
 /** Pay every refund the cancellation owes and has not paid yet. */
 async function payCancelRefunds({ db, payments }: Deps, eventId: string): Promise<CancelEventResult> {
   const ev = (await getEvent(db, eventId))!;
-  const owed = await listUnpaidCancelRefunds(db, eventId);
+  const owedNow = await listUnpaidEventCancelRefunds(db, eventId);
   let failed = 0;
-  for (const o of owed) {
+  for (const { refund, paymentId } of owedNow) {
     try {
-      const refund = await payments.refund(o.paymentId, o.refundCents!, `event-cancel-${o.id}`);
-      await setRefundId(db, o.id, refund.id);
+      const paid = await payments.refund(paymentId, refund.netCents, refund.idempotencyKey);
+      await setProviderRefundId(db, refund.id, paid.id);
     } catch {
       failed++;
     }
   }
   if (failed > 0) {
-    throw new OrderError(`The event is cancelled, but ${failed} of ${owed.length} refunds failed at the payment provider. Cancel again to retry them.`);
+    throw new OrderError(`The event is cancelled, but ${failed} of ${owedNow.length} refunds failed at the payment provider. Cancel again to retry them.`);
   }
-  const all = await listCancelRefunds(db, eventId);
-  return { event: ev, refundedOrders: all.length, refundedCents: all.reduce((sum, o) => sum + (o.refundCents ?? 0), 0) };
+  const all = await listEventCancelRefunds(db, eventId);
+  return { event: ev, refundedOrders: all.length, refundedCents: all.reduce((sum, r) => sum + r.refund.netCents, 0) };
 }

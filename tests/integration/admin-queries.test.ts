@@ -59,7 +59,7 @@ describe("admin tables", () => {
 
   it("lists refunds, per-event revenue and per-code usage", async () => {
     const { s, ev, b } = await history();
-    expect((await listRefunds(s.db)).map((r) => r.order.refundCents)).toEqual([9_800]);
+    expect((await listRefunds(s.db)).map((r) => r.refund.netCents)).toEqual([9_800]);
     const [row] = (await listEventsAdmin(s.db)).filter((r) => r.event.id === ev.id);
     expect(row).toMatchObject({ orders: 3, refunds: 1, refundedCents: 9_800 });
     const [code] = await listCodesAdmin(s.db);

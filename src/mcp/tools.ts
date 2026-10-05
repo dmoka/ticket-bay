@@ -12,13 +12,14 @@ import { cancelImpact } from "../db/admin-queries";
 import type { Db } from "../db/client";
 import { getEvent, listEvents, toDomainEvent } from "../db/events-repo";
 import { listOrdersByUser, toDomainOrder } from "../db/orders-repo";
-import type { EventRow, OrderRow } from "../db/schema";
+import { listRefundsForOrder, listRefundsForOrders } from "../db/refunds-repo";
+import type { EventRow, OrderRow, RefundRow } from "../db/schema";
 import { seatsAvailable } from "../domain/booking";
-import { previewCancellation } from "../domain/cancellation";
+import { quoteCancellation, refundsSoFar } from "../domain/cancellation";
 import { buildInvoice, EARLY_BIRD_PERCENT, earlyBirdApplies, earlyBirdEndsMs } from "../domain/invoice";
 import { priceTiers } from "../domain/pricing";
 import type { PaymentProvider } from "../payments";
-import { cancelOwnOrder, OrderError, placeOrder, quoteOrder } from "../services/orders";
+import { cancelOwnOrder, OrderError, placeOrder, quoteOrder, quoteOwnCancel } from "../services/orders";
 import { loadHelpDocs, searchDocs } from "./docs";
 
 /** Who is calling. null = anonymous: public tools only. */
@@ -40,12 +41,13 @@ export interface ToolDeps {
 }
 
 export const PUBLIC_TOOLS = ["list_events", "get_event", "quote_price", "search_docs"] as const;
-export const PRIVATE_TOOLS = ["book_tickets", "my_orders", "refund_order", "cancel_event"] as const;
+export const PRIVATE_TOOLS = ["book_tickets", "my_orders", "quote_refund", "refund_order", "cancel_event"] as const;
 
 /** The key scope each private tool needs. A read-only key gets tickets:read only. */
 const SCOPE: Record<(typeof PRIVATE_TOOLS)[number], string> = {
   book_tickets: "tickets:write",
   my_orders: "tickets:read",
+  quote_refund: "tickets:read",
   refund_order: "tickets:write",
   cancel_event: "tickets:write",
 };
@@ -107,8 +109,25 @@ function eventSummary(ev: EventRow, nowMs: number) {
   };
 }
 
-function orderSummary(order: OrderRow, ev: EventRow, nowMs: number, baseURL: string) {
-  const refund = order.status === "paid" ? previewCancellation(toDomainOrder(order, ev), nowMs) : null;
+/** One cancellation on an order, for a model to read. */
+function refundSummary(r: RefundRow) {
+  return {
+    tickets: r.tickets,
+    refunded_eur: eur(r.netCents),
+    refund_fee_kept_eur: eur(r.feeCents),
+    seats_released: r.seatsReleased,
+    reason: r.reason === "event_cancelled" ? "the organiser cancelled the event" : "the customer cancelled",
+    refunded_at: localTime(r.createdAtMs),
+  };
+}
+
+/** `refunds` is every refund of the order, oldest first. */
+function orderSummary(order: OrderRow, ev: EventRow, refunds: RefundRow[], nowMs: number, baseURL: string) {
+  const soFar = refundsSoFar(refunds);
+  const ticketsLeft = order.quantity - soFar.ticketsCancelled;
+  // What cancelling every ticket left would pay right now — the same domain function refund_order pays with.
+  const refund = order.status === "paid" && ticketsLeft > 0 ? quoteCancellation(toDomainOrder(order, ev), soFar, ticketsLeft, nowMs) : null;
+  const lastRefundAt = Math.max(...refunds.map((r) => r.createdAtMs));
   return {
     order_id: order.id,
     order_number: orderNumber(order.id),
@@ -116,37 +135,69 @@ function orderSummary(order: OrderRow, ev: EventRow, nowMs: number, baseURL: str
     tickets: order.quantity,
     total_paid_eur: eur(order.totalCents),
     status: order.status,
-    ...(order.status === "refunded"
-      ? {
-          refunded_eur: eur(order.refundCents ?? 0),
-          refunded_at: localTime(order.refundedAtMs ?? 0),
-          ...(order.seatsReleased === false && {
-            note: "Cancelled after the event started: by TicketBay's refund policy nothing is paid back and the seats stayed with the customer. This is expected, not an error.",
-          }),
-        }
-      : {
-          refund_if_cancelled_now_eur: eur(refund!.netCents),
-          // How the refund is built, so no one has to reverse-engineer it:
-          // tickets part − refund fee = refund; the service fee is never refunded.
-          refund_breakdown: refund!.windowOpen
-            ? {
-                tickets_paid_eur: eur(order.ticketsCents),
-                service_fee_paid_eur: eur(order.feeCents),
-                refund_fee_eur: eur(refund!.feeCents),
-                refund_eur: eur(refund!.netCents),
-                rule: "refund = tickets paid − refund fee; the service fee is not refundable",
-              }
-            : {
-                tickets_paid_eur: eur(order.ticketsCents),
-                service_fee_paid_eur: eur(order.feeCents),
-                refund_eur: 0,
-                rule: "the event has started: nothing is refunded and the seats stay with the customer",
-              },
-          refund_window_open: refund!.windowOpen,
-        }),
+    tickets_cancelled: soFar.ticketsCancelled,
+    // Totals over every cancellation so far; each one is listed in `refunds`.
+    ...(refunds.length > 0 && {
+      refunded_eur: eur(soFar.grossCents - soFar.feeCents),
+      refund_fee_kept_eur: eur(soFar.feeCents),
+      refunded_at: localTime(lastRefundAt),
+      ...(refunds.some((r) => !r.seatsReleased) && {
+        note: "Cancelled after the event started: by TicketBay's refund policy nothing is paid back for those tickets and the seats stayed with the customer. This is expected, not an error.",
+      }),
+    }),
+    refunds: refunds.map(refundSummary),
+    ...(refund && {
+      tickets_left: ticketsLeft,
+      refund_if_cancelled_now_eur: eur(refund.netCents),
+      // How the refund is built, so no one has to reverse-engineer it:
+      // tickets part − refund fee = refund; the service fee is never refunded.
+      refund_breakdown: refund.windowOpen
+        ? {
+            tickets_paid_eur: eur(order.ticketsCents),
+            service_fee_paid_eur: eur(order.feeCents),
+            ...(soFar.ticketsCancelled > 0 && { tickets_part_eur: eur(refund.grossCents) }),
+            refund_fee_eur: eur(refund.feeCents),
+            refund_eur: eur(refund.netCents),
+            rule:
+              soFar.ticketsCancelled === 0
+                ? "refund = tickets paid − refund fee; the service fee is not refundable"
+                : `refund = the tickets part for the ${ticketsLeft} tickets left − refund fee, on running totals so partial cancels add up to a whole-order cancel; the service fee is not refundable`,
+          }
+        : {
+            tickets_paid_eur: eur(order.ticketsCents),
+            service_fee_paid_eur: eur(order.feeCents),
+            refund_eur: 0,
+            rule: "the event has started: nothing is refunded and the seats stay with the customer",
+          },
+      refund_window_open: refund.windowOpen,
+    }),
     url: new URL(`/orders/${order.id}`, baseURL).toString(),
   };
 }
+
+/** What refund_order requires, and the help a model gets when it leaves it out. */
+const ticketsToCancel = z
+  .number({
+    error: (issue) =>
+      issue.input === undefined
+        ? 'tickets is required: send how many of the order\'s tickets to cancel, e.g. {"order_id": "TB-00144", "tickets": 2, "idempotency_key": "<a new unique string>"}. ' +
+          "my_orders shows tickets_left; to cancel the whole order, send all of them. Call quote_refund first to see what it pays."
+        : "tickets must be a whole number of tickets, at least 1.",
+  })
+  .int("tickets must be a whole number of tickets, at least 1.")
+  .min(1, "tickets must be a whole number of tickets, at least 1.");
+
+const KEY_HELP =
+  "idempotency_key is required: any unique string for this cancellation (1-100 characters), " +
+  'e.g. {"order_id": "TB-00144", "tickets": 2, "idempotency_key": "cancel-2-of-TB-00144-a1b2"}. ' +
+  "Reuse it only to retry the same cancellation after a timeout or lost reply: you get the first result back and nothing more is cancelled.";
+
+/** refund_order's key: without one, a resend after a lost reply would cancel the same number of tickets again. */
+const cancelIdempotencyKey = z
+  .string({ error: (issue) => (issue.input === undefined ? KEY_HELP : "idempotency_key must be a string of 1-100 characters.") })
+  .trim()
+  .min(1, KEY_HELP)
+  .max(100, "idempotency_key must be a string of 1-100 characters.");
 
 /** "group 5% + early-bird 10% + code WELCOME10 10%" */
 function discountParts(group: number, earlyBird: number, code: { code: string; percent: number } | null): string {
@@ -175,7 +226,8 @@ export function createTicketBayServer(deps: ToolDeps, caller: Caller, opts: { in
         "Browse with list_events → get_event → quote_price. " +
         (opts.includePrivate
           ? "book_tickets charges the customer's card; always quote first and get the customer's explicit yes. " +
-            "refund_order cannot be undone; say the refund amount from my_orders before calling it."
+            "refund_order cancels some or all of an order's tickets and cannot be undone; get the amount from quote_refund, say it, and get a yes before calling it. " +
+            "Give every cancellation a new idempotency_key and resend the same one only to retry."
           : "This local server only browses. Booking needs TicketBay's remote MCP server with an API key.") +
         " For questions about refunds, discounts, fees or API keys, call search_docs and answer from the docs.",
     },
@@ -366,7 +418,9 @@ export function createTicketBayServer(deps: ToolDeps, caller: Caller, opts: { in
           },
         );
         const ev = (await getEvent(db, order.eventId))!;
-        return json({ booked: true, replayed, ...orderSummary(order, ev, nowMs, baseURL) });
+        // A replay can be of an order cancelled since: show its refunds too.
+        const refunds = replayed ? await listRefundsForOrder(db, order.id) : [];
+        return json({ booked: true, replayed, ...orderSummary(order, ev, refunds, nowMs, baseURL) });
       });
     },
   );
@@ -376,7 +430,8 @@ export function createTicketBayServer(deps: ToolDeps, caller: Caller, opts: { in
     {
       title: "My orders",
       description:
-        "The signed-in customer's orders, newest first: event, tickets, amount paid, status, and — for paid orders — how much a refund would return right now. " +
+        "The signed-in customer's orders, newest first: event, tickets, amount paid, status, every cancellation so far (refunds, with totals), " +
+        "and — for orders with tickets left — how much cancelling all of them would return right now. " +
         "Only ever shows the caller's own orders. Requires an API key (read-only is enough).",
       inputSchema: z.object({ status: z.enum(["paid", "refunded", "all"]).default("all") }),
       annotations: { readOnlyHint: true, openWorldHint: false },
@@ -386,35 +441,87 @@ export function createTicketBayServer(deps: ToolDeps, caller: Caller, opts: { in
       if (isResult(c)) return c;
       const nowMs = now();
       const rows = (await listOrdersByUser(db, c.userId)).filter(({ order }) => status === "all" || order.status === status);
-      return json({ customer: c.email, count: rows.length, orders: rows.map(({ order, event }) => orderSummary(order, event, nowMs, baseURL)) });
+      const refunds = await listRefundsForOrders(db, rows.map(({ order }) => order.id));
+      return json({
+        customer: c.email,
+        count: rows.length,
+        orders: rows.map(({ order, event }) => orderSummary(order, event, refunds.get(order.id)!, nowMs, baseURL)),
+      });
+    },
+  );
+
+  server.registerTool(
+    "quote_refund",
+    {
+      title: "Quote a refund",
+      description:
+        "What cancelling some of the customer's tickets on one of their orders would refund RIGHT NOW — exactly what refund_order would pay at this moment, " +
+        "with the refund fee and whether the seats go back on sale. Changes nothing. Leave out tickets to quote every ticket still on the order. " +
+        "Requires an API key (read-only is enough).",
+      inputSchema: z.object({
+        order_id: orderIdInput,
+        tickets: z.number().int().min(1).optional().describe("How many tickets to cancel. Default: every ticket still on the order."),
+      }),
+      annotations: { readOnlyHint: true, openWorldHint: false },
+    },
+    async ({ order_id, tickets }) => {
+      const c = who("quote_refund");
+      if (isResult(c)) return c;
+      return run(async () => {
+        const q = await quoteOwnCancel({ db, nowMs: now() }, c.userId, parseOrderId(order_id), tickets);
+        return json({
+          order_id: q.order.id,
+          order_number: orderNumber(q.order.id),
+          tickets: q.tickets,
+          tickets_left: q.ticketsLeft,
+          refund_eur: eur(q.netCents),
+          refund_fee_eur: eur(q.feeCents),
+          tickets_part_eur: eur(q.grossCents),
+          seats_released: q.releasesSeats,
+          refund_window_open: q.windowOpen,
+          rule: q.windowOpen
+            ? "refund = tickets part − refund fee, priced on running totals so partial cancels add up to a whole-order cancel; the service fee is not refundable"
+            : "the event has started: only every ticket left can be cancelled; nothing is refunded and the seats stay with the customer",
+          next: `refund_order with {"order_id": ${q.order.id}, "tickets": ${q.tickets}, "idempotency_key": "<a new unique string>"} pays this, if nothing changes first.`,
+        });
+      });
     },
   );
 
   server.registerTool(
     "refund_order",
     {
-      title: "Refund an order",
+      title: "Refund tickets",
       description:
-        "Cancel one of the customer's own orders and refund it NOW, by TicketBay's refund rules (refund fee kept; nothing back once the event has started). " +
-        "Cannot be undone. Tell the customer the refund amount from my_orders and get an explicit yes first. " +
-        "Returns the refund and a link to the order page. Requires a read & write API key.",
-      inputSchema: z.object({ order_id: orderIdInput }),
-      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
+        "Cancel some or all of the tickets on one of the customer's own orders and refund them NOW, by TicketBay's refund rules " +
+        "(refund fee kept). `tickets` is required: how many to cancel. An order can be cancelled in parts, any number of times, until no tickets " +
+        "are left or the event starts; once it has started only all the tickets left can be cancelled, and nothing is paid back. Cannot be undone. " +
+        "Get the amount from quote_refund, tell the customer, and get an explicit yes first. `idempotency_key` is required: a new unique string per " +
+        "cancellation; pass the same one only to retry after a timeout or lost reply (you get the first result back, `replayed: true`, and nothing " +
+        "more is cancelled). Returns this refund, the order's refund totals, and a link to the order page. Requires a read & write API key.",
+      inputSchema: z.object({
+        order_id: orderIdInput,
+        tickets: ticketsToCancel.describe("How many of the order's tickets to cancel, at least 1. Send all of them to cancel the whole order."),
+        idempotency_key: cancelIdempotencyKey.describe("Any unique string for this cancellation, 1-100 characters; reuse it only to retry the same cancellation."),
+      }),
+      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false },
     },
-    async ({ order_id }) => {
+    async ({ order_id, tickets, idempotency_key }) => {
       const c = who("refund_order");
       if (isResult(c)) return c;
       return run(async () => {
         const id = parseOrderId(order_id);
         const nowMs = now();
-        const r = await cancelOwnOrder({ db, payments: deps.payments, nowMs }, c.userId, id);
+        // Namespaced per user: one customer's key can never replay another's cancellation.
+        const r = await cancelOwnOrder({ db, payments: deps.payments, nowMs }, c.userId, id, tickets, `mcp:${c.userId}:${idempotency_key}`);
         const ev = (await getEvent(db, r.order.eventId))!;
         return json({
           refunded: true,
-          refunded_eur: eur(r.refundCents),
-          refund_fee_kept_eur: eur(r.refundFeeCents),
+          replayed: r.replayed,
+          this_refund: refundSummary(r.refund),
           seats_released: r.seatsReleased,
-          ...orderSummary(r.order, ev, nowMs, baseURL),
+          // refunded_eur and refund_fee_kept_eur below are the order's totals, this refund included.
+          ...orderSummary(r.order, ev, r.refunds, nowMs, baseURL),
         });
       });
     },

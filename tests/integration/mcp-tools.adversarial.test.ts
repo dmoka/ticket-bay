@@ -75,7 +75,7 @@ describe("ADVERSARIAL anonymous callers never reach a private tool", () => {
   it.each(["book_tickets", "my_orders", "refund_order", "cancel_event"])("%s refuses an anonymous caller and changes nothing", async (tool) => {
     clock = NOW;
     const ev = await venue(t.db);
-    const args = { book_tickets: { event_id: ev.id, quantity: 1 }, my_orders: {}, refund_order: { order_id: 1 }, cancel_event: { event_id: ev.id } }[tool]!;
+    const args = { book_tickets: { event_id: ev.id, quantity: 1 }, my_orders: {}, refund_order: { order_id: 1, tickets: 1, idempotency_key: crypto.randomUUID() }, cancel_event: { event_id: ev.id } }[tool]!;
     const r = await call(null, tool, args);
     expect(isToolError(r)).toBeTruthy();
     expect(toolText(r)).toMatch(/401|unauthori[sz]ed/i);
@@ -115,7 +115,7 @@ describe("ADVERSARIAL key scopes are enforced per tool", () => {
     expect(forbidden(replay), toolText(replay)).toBe(true);
     expect(toolText(replay)).not.toContain(String(orderId).padStart(5, "0"));
 
-    const refund = await call(readOnly, "refund_order", { order_id: orderId });
+    const refund = await call(readOnly, "refund_order", { order_id: orderId, tickets: 1, idempotency_key: crypto.randomUUID() });
     expect(forbidden(refund), toolText(refund)).toBe(true);
     expect((await getOrder(t.db, orderId))!.status).toBe("paid");
     expect(await orderCount()).toBe(1);
@@ -185,7 +185,7 @@ describe("ADVERSARIAL cross-user access through the tools", () => {
     expect(bobsView.orders.map((o: { order_id: number }) => o.order_id)).toEqual([bobResult.order_id]);
 
     for (const id of [aliceOrder, `TB-${String(aliceOrder).padStart(5, "0")}`, `tb-${aliceOrder}`, `TB-000000000${aliceOrder}`]) {
-      const r = await call(bob, "refund_order", { order_id: id });
+      const r = await call(bob, "refund_order", { order_id: id, tickets: 1, idempotency_key: crypto.randomUUID() });
       expect(isToolError(r), String(id)).toBeTruthy();
       expect(toolText(r)).toMatch(/not found/i);
     }
@@ -195,7 +195,7 @@ describe("ADVERSARIAL cross-user access through the tools", () => {
   it("refund_order rejects junk ids without crashing", async () => {
     const u = await newUser();
     for (const id of [0, -1, 1.5, "1e3", "TB-", "", "0x10", "99999999999999999999"]) {
-      const r = await call(u, "refund_order", { order_id: id });
+      const r = await call(u, "refund_order", { order_id: id, tickets: 1, idempotency_key: crypto.randomUUID() });
       expect(isToolError(r), String(id)).toBeTruthy();
       expect(r.status, String(id)).toBeLessThan(500);
     }

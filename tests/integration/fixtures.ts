@@ -2,9 +2,46 @@
 // migrations, no mocks — each test file gets its own database (database.ts).
 import type { Db } from "../../src/db/client";
 import { createEvent } from "../../src/db/events-repo";
-import { discountCodes } from "../../src/db/schema";
+import { getOrder } from "../../src/db/orders-repo";
+import { listRefundsForOrder } from "../../src/db/refunds-repo";
+import { discountCodes, type OrderRow, type RefundRow } from "../../src/db/schema";
 import { createFakeStripe, type PaymentProvider } from "../../src/payments";
 import { placeOrder, cancelOrder, type Deps } from "../../src/services/orders";
+
+/** An order's refunds, summed: null before the first refund. The latest refund's time, seats, reason and payout id. */
+export interface RefundTotals {
+  refunds: RefundRow[];
+  ticketsCancelled: number;
+  /** net paid back, over every refund */
+  refundCents: number | null;
+  /** fees kept, over every refund */
+  refundFeeCents: number | null;
+  refundedAtMs: number | null;
+  seatsReleased: boolean | null;
+  refundReason: RefundRow["reason"] | null;
+  /** the provider's id of the latest refund's payout */
+  refundId: string | null;
+}
+
+/** An order with its refund totals, read from the refunds table. */
+export async function getOrderRefunded(db: Db, id: number): Promise<(OrderRow & RefundTotals) | undefined> {
+  const order = await getOrder(db, id);
+  if (!order) return undefined;
+  const refunds = await listRefundsForOrder(db, id);
+  const last = refunds.at(-1);
+  const sum = (f: (r: RefundRow) => number) => (last ? refunds.reduce((s, r) => s + f(r), 0) : null);
+  return {
+    ...order,
+    refunds,
+    ticketsCancelled: refunds.reduce((s, r) => s + r.tickets, 0),
+    refundCents: sum((r) => r.netCents),
+    refundFeeCents: sum((r) => r.feeCents),
+    refundedAtMs: last?.createdAtMs ?? null,
+    seatsReleased: last?.seatsReleased ?? null,
+    refundReason: last?.reason ?? null,
+    refundId: last?.providerRefundId ?? null,
+  };
+}
 
 export const NOW = 1_800_000_000_000;
 export const HOUR = 3_600_000;
@@ -53,8 +90,8 @@ export function shop(db: Db, payments: PaymentProvider = createFakeStripe("sk_te
         idempotencyKey: extra.idempotencyKey ?? `key-${++keys}`,
       });
     },
-    cancel(orderId: number) {
-      return cancelOrder(deps(), orderId);
+    cancel(orderId: number, tickets?: number, idempotencyKey?: string) {
+      return cancelOrder(deps(), orderId, tickets, idempotencyKey);
     },
   };
 }

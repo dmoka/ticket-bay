@@ -13,12 +13,11 @@ import { createFakeStripe, type PaymentProvider } from "../../src/payments";
 import type { Auth } from "../../src/auth/auth";
 import type { Db } from "../../src/db/client";
 import { getEvent } from "../../src/db/events-repo";
-import { getOrder } from "../../src/db/orders-repo";
 import { events, orders, user } from "../../src/db/schema";
 import { resolveCaller } from "../../src/mcp/caller";
 import { UNAUTHENTICATED_MESSAGE } from "../../src/mcp/tools";
 import { useTestDatabase } from "./database";
-import { DAY, HOUR, venue } from "./fixtures";
+import { DAY, HOUR, venue, getOrderRefunded } from "./fixtures";
 import {
   BASE_URL,
   ban,
@@ -205,7 +204,7 @@ describe("anonymous callers", () => {
   it.each([
     ["book_tickets", { event_id: "any", quantity: 1 }],
     ["my_orders", {}],
-    ["refund_order", { order_id: 1 }],
+    ["refund_order", { order_id: 1, tickets: 1, idempotency_key: crypto.randomUUID() }],
     ["cancel_event", { event_id: "any" }],
   ])("get a 401 with the readable message from %s", async (tool, args) => {
     const reply = await call(tool, args);
@@ -237,7 +236,7 @@ describe("orders belong to the account that booked them", () => {
     const ev = await upcoming(t.db);
 
     const booked = await book(anna, ev.id, 2);
-    const stored = (await getOrder(t.db, booked.order_id))!;
+    const stored = (await getOrderRefunded(t.db, booked.order_id))!;
     expect(stored.userId).toBe(anna.id);
     expect(stored.customerEmail).toBe(anna.email);
 
@@ -247,11 +246,11 @@ describe("orders belong to the account that booked them", () => {
 
     // B cannot refund it, by numeric id or by order number — and learns nothing.
     for (const id of [booked.order_id, booked.order_number, String(booked.order_id)]) {
-      const r = toolResult(await call("refund_order", { order_id: id }, bearer(bela.key)));
+      const r = toolResult(await call("refund_order", { order_id: id, tickets: 1, idempotency_key: crypto.randomUUID() }, bearer(bela.key)));
       expect(r.isError).toBe(true);
       expect(r.text).toBe("Order not found.");
     }
-    const still = (await getOrder(t.db, booked.order_id))!;
+    const still = (await getOrderRefunded(t.db, booked.order_id))!;
     expect(still.status).toBe("paid");
     expect(still.refundedAtMs).toBeNull();
     expect(still.refundId).toBeNull();
@@ -262,10 +261,10 @@ describe("orders belong to the account that booked them", () => {
     expect(aList.data.orders.map((o: { order_id: number }) => o.order_id)).toEqual([booked.order_id]);
     const promised = aList.data.orders[0].refund_if_cancelled_now_eur;
 
-    const refund = toolResult(await call("refund_order", { order_id: booked.order_number }, bearer(anna.key)));
+    const refund = toolResult(await call("refund_order", { order_id: booked.order_number, tickets: 2, idempotency_key: crypto.randomUUID() }, bearer(anna.key)));
     expect(refund.isError, refund.text).toBe(false);
     expect(refund.data).toMatchObject({ refunded: true, status: "refunded", order_id: booked.order_id, refunded_eur: promised });
-    const after = (await getOrder(t.db, booked.order_id))!;
+    const after = (await getOrderRefunded(t.db, booked.order_id))!;
     expect(after.status).toBe("refunded");
     expect(after.refundId).not.toBeNull();
     expect((await getEvent(t.db, ev.id))!.seatsSold).toBe(40);
@@ -274,7 +273,7 @@ describe("orders belong to the account that booked them", () => {
   it("an unknown order id and a nonsense id are 'not found' for everyone", async () => {
     const anna = await customer(auth, "Anna");
     for (const id of [999_999, "TB-99999"]) {
-      const r = toolResult(await call("refund_order", { order_id: id }, bearer(anna.key)));
+      const r = toolResult(await call("refund_order", { order_id: id, tickets: 1, idempotency_key: crypto.randomUUID() }, bearer(anna.key)));
       expect(r).toMatchObject({ isError: true, text: "Order not found." });
     }
   });
@@ -291,8 +290,8 @@ describe("idempotent replay across users", () => {
     expect(a.replayed).toBe(false);
     expect(b.replayed).toBe(false);
     expect(b.order_id).not.toBe(a.order_id);
-    expect((await getOrder(t.db, a.order_id))!.userId).toBe(anna.id);
-    expect((await getOrder(t.db, b.order_id))!.userId).toBe(bela.id);
+    expect((await getOrderRefunded(t.db, a.order_id))!.userId).toBe(anna.id);
+    expect((await getOrderRefunded(t.db, b.order_id))!.userId).toBe(bela.id);
     expect((await getEvent(t.db, ev.id))!.seatsSold).toBe(42);
   });
 
@@ -329,7 +328,7 @@ describe("cancel_event (admin) only prepares the cancellation", () => {
     expect(r.text).toMatch(/already started/);
     expect(r.text).not.toContain("confirm");
     expect((await getEvent(t.db, ev.id))!.cancelledAtMs).toBeNull();
-    expect((await getOrder(t.db, booked.order_id))!.status).toBe("paid");
+    expect((await getOrderRefunded(t.db, booked.order_id))!.status).toBe("paid");
   });
 
   it("an admin gets the impact and a confirm link; the event is NOT cancelled and no order is refunded", async () => {
@@ -345,6 +344,6 @@ describe("cancel_event (admin) only prepares the cancellation", () => {
     expect(r.data.confirm_url).toBe(`http://localhost:3000/admin/events/${ev.id}/cancel?via=mcp`);
 
     expect((await getEvent(t.db, ev.id))!.cancelledAtMs).toBeNull();
-    expect((await getOrder(t.db, booked.order_id))!.status).toBe("paid");
+    expect((await getOrderRefunded(t.db, booked.order_id))!.status).toBe("paid");
   });
 });

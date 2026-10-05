@@ -7,7 +7,7 @@ import { CATEGORY_LABEL, eventStatus } from "@/lib/status";
 import { Meter, Mono, PageHeader, StatusBadge, Tag } from "@/components/app/primitives";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { RetryRefunds } from "./retry-refunds";
-import { listUnpaidCancelRefunds } from "@/src/db/orders-repo";
+import { listUnpaidEventCancelRefunds } from "@/src/db/refunds-repo";
 
 export const metadata = { title: "Events" };
 
@@ -17,7 +17,7 @@ export default async function AdminEvents({ searchParams }: { searchParams: Prom
   const rows = await listEventsAdmin(getDb());
   // Back from the event's cancel page: report what the cancellation did.
   const justCancelled = rows.find((r) => r.event.id === sp.cancelled && r.event.cancelledAtMs !== null);
-  const unpaid = justCancelled ? (await listUnpaidCancelRefunds(getDb(), justCancelled.event.id)).length : 0;
+  const unpaid = justCancelled ? (await listUnpaidEventCancelRefunds(getDb(), justCancelled.event.id)).length : 0;
   const capacity = rows.reduce((s, r) => s + r.event.totalSeats, 0);
   const sold = rows.reduce((s, r) => s + r.event.seatsSold, 0);
 

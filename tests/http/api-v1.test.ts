@@ -243,7 +243,7 @@ describe("POST /api/v1/orders/{id}/cancel", () => {
     const r = await cancel(o.id, bearer(anna.key));
     expect(r.status, r.text).toBe(200);
     // 2 x €50 = 10000 cents of tickets; refund fee 2% = 200; the 300 service fee is kept.
-    expect(r.body.refund).toEqual({ refundCents: 9800, refundFeeCents: 200, seatsReleased: true });
+    expect(r.body.refund).toEqual({ tickets: 2, refundCents: 9800, refundFeeCents: 200, seatsReleased: true });
     expect(r.body.order).toMatchObject({ id: o.id, status: "refunded", refundCents: 9800, refundedAt: new Date(NOW).toISOString() });
     expect((await getEvent(t.db, "rockfest"))!.seatsSold).toBe(40);
   });
@@ -254,7 +254,7 @@ describe("POST /api/v1/orders/{id}/cancel", () => {
     const o = await book(anna, "rockfest", 2);
     const r = await cancel(o.id, bearer(anna.key), { nowMs: NOW + DAY });
     expect(r.status, r.text).toBe(200);
-    expect(r.body.refund).toEqual({ refundCents: 0, refundFeeCents: 0, seatsReleased: false });
+    expect(r.body.refund).toEqual({ tickets: 2, refundCents: 0, refundFeeCents: 0, seatsReleased: false });
     expect((await getEvent(t.db, "rockfest"))!.seatsSold).toBe(42);
   });
 

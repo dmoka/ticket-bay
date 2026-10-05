@@ -11,10 +11,9 @@
 import { describe, it, expect } from "vitest";
 import { getEvent } from "../../src/db/events-repo";
 import { getCode } from "../../src/db/codes-repo";
-import { getOrder } from "../../src/db/orders-repo";
 import { OrderError } from "../../src/services/orders";
 import { useTestDatabase } from "./database";
-import { addCode, chargesTogether, DAY, HOUR, NOW, shop, venue } from "./fixtures";
+import { addCode, chargesTogether, DAY, HOUR, NOW, shop, venue, getOrderRefunded } from "./fixtures";
 
 const t = useTestDatabase();
 
@@ -214,7 +213,7 @@ describe("checkout", () => {
     const ev = await venue(s.db);
     const { order } = await s.book(ev.id, 2);
     await s.cancel(order.id);
-    const after = (await getOrder(s.db, order.id))!;
+    const after = (await getOrderRefunded(s.db, order.id))!;
     expect(after.refundId).toMatch(/^re_/);
     expect(s.payments.getCharge(order.paymentId)?.refundedCents).toBe(9_800);
   });

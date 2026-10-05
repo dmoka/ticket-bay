@@ -24,7 +24,7 @@ export default async function AdminOverview({ searchParams }: { searchParams: Pr
     {
       label: "Refunds",
       value: moneyShort(o.refunds.cur),
-      sub: `${o.refunds.count} orders`,
+      sub: `${o.refunds.count} ${o.refunds.count === 1 ? "cancellation" : "cancellations"}`,
       kpi: o.refunds,
       delta: <Delta cur={o.refunds.cur} prev={o.refunds.prev} invert />,
     },

@@ -6,12 +6,11 @@
 import { randomUUID } from "node:crypto";
 import { describe, it, expect } from "vitest";
 import { getEvent } from "../../src/db/events-repo";
-import { getOrder } from "../../src/db/orders-repo";
 import { user } from "../../src/db/schema";
 import { createFakeStripe, type PaymentProvider } from "../../src/payments";
 import { cancelEvent, cancelOwnOrder, OrderError, placeOrder, type Deps } from "../../src/services/orders";
 import { useTestDatabase } from "./database";
-import { NOW, venue } from "./fixtures";
+import { NOW, venue, getOrderRefunded } from "./fixtures";
 
 const t = useTestDatabase();
 const deps = (payments: PaymentProvider): Deps => ({ db: t.db, payments, nowMs: NOW });
@@ -30,7 +29,7 @@ function describeRaw(e: unknown): string {
 /** Every order: the provider paid out exactly what our books say, never above the tickets part. */
 async function assertBooksMatchMoney(payments: PaymentProvider, ids: { id: number; paymentId: string; ticketsCents: number }[]) {
   for (const o of ids) {
-    const row = (await getOrder(t.db, o.id))!;
+    const row = (await getOrderRefunded(t.db, o.id))!;
     expect(row.status, `order ${o.id}`).toBe("refunded");
     const refunded = payments.getCharge(o.paymentId)!.refundedCents;
     expect(refunded, `order ${o.id} (${row.refundReason})`).toBe(row.refundCents);

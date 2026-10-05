@@ -25,9 +25,30 @@ export interface Order {
  * per ticket — `{totalCents: 150, tickets: 300}` pays out 150 cents too much
  * one ticket at a time. Note this is NOT limited to orders that cost less than
  * they have tickets: `{totalCents: 10001, tickets: 3}` overshoots too.
+ * `quoteCancellation` in ./cancellation.ts is that caller: it prices every
+ * partial cancel on running totals, never one call per cancel.
  */
 export function calculateRefund(order: Order, cancelled: number, nowMs: number): number {
-  if (!Number.isInteger(cancelled) || cancelled < 0 || cancelled > order.tickets) {
+  const share = paidShare(order, cancelled);
+  if (!Number.isFinite(nowMs)) {
+    throw new RangeError("current time out of range");
+  }
+  // `>=`: the window closes the instant the event starts. Mirrored in
+  // src/services/orders.ts, which returns seats to inventory only while it is open.
+  if (nowMs >= order.eventStartMs) {
+    return 0;
+  }
+  return share;
+}
+
+/**
+ * The part of what was paid that `tickets` of the order's tickets stand for,
+ * rounded to the nearest cent, with no refund window: `calculateRefund`
+ * before the event starts. `paidShare(order, order.tickets)` is the whole
+ * `totalCents`.
+ */
+export function paidShare(order: Order, tickets: number): number {
+  if (!Number.isInteger(tickets) || tickets < 0 || tickets > order.tickets) {
     throw new RangeError("cancelled tickets out of range");
   }
   if (!Number.isInteger(order.tickets) || order.tickets <= 0) {
@@ -42,15 +63,7 @@ export function calculateRefund(order: Order, cancelled: number, nowMs: number):
   if (!Number.isFinite(order.eventStartMs)) {
     throw new RangeError("event start out of range");
   }
-  if (!Number.isFinite(nowMs)) {
-    throw new RangeError("current time out of range");
-  }
-  // `>=`: the window closes the instant the event starts. Mirrored in
-  // src/services/orders.ts, which returns seats to inventory only while it is open.
-  if (nowMs >= order.eventStartMs) {
-    return 0;
-  }
-  return exactShare(order.totalCents, cancelled, order.tickets);
+  return exactShare(order.totalCents, tickets, order.tickets);
 }
 
 /**

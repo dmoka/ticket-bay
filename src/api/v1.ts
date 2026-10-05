@@ -14,12 +14,14 @@ import { eventStatus } from "../../lib/status";
 import type { Auth } from "../auth/auth";
 import type { Db } from "../db/client";
 import { getEvent, listEvents, toDomainEvent } from "../db/events-repo";
-import type { EventRow, OrderRow } from "../db/schema";
+import { listRefundsForOrder } from "../db/refunds-repo";
+import type { EventRow, OrderRow, RefundRow } from "../db/schema";
 import { seatsAvailable } from "../domain/booking";
+import { refundsSoFar, type CancellationQuote } from "../domain/cancellation";
 import { earlyBirdEndsMs, type Invoice } from "../domain/invoice";
 import { resolveCaller } from "../mcp/caller";
 import { PaymentError, type PaymentProvider } from "../payments";
-import { cancelOwnOrder, OrderError, placeOrder, quoteOrder } from "../services/orders";
+import { cancelOwnOrder, OrderError, placeOrder, quoteOrder, quoteOwnCancel } from "../services/orders";
 
 export interface ApiDeps {
   db: Db;
@@ -62,12 +64,24 @@ const IdempotencyKey = z.string().trim().min(1).max(100);
 /** Order ids are positive Postgres INTEGERs, written in decimal. */
 const OrderIdParam = z.string().regex(/^[1-9]\d{0,9}$/);
 
-async function readBody<T>(request: Request, schema: z.ZodType<T>): Promise<T> {
+/** How many of an order's tickets to cancel; left out, every ticket still on the order. */
+const CancelBody = z.object({
+  tickets: z.number().int().min(1).optional(),
+});
+
+/** `?tickets=N` on the cancel quote: a whole number, at least 1. */
+const TicketsParam = z.string().regex(/^[1-9]\d{0,3}$/, "must be a whole number of tickets, at least 1, e.g. ?tickets=2");
+
+async function readBody<T>(request: Request, schema: z.ZodType<T>, { optional = false } = {}): Promise<T> {
   let raw: unknown;
   try {
-    raw = JSON.parse(await request.text());
+    const text = await request.text();
+    raw = optional && text.trim() === "" ? {} : JSON.parse(text);
   } catch {
-    throw new ApiError(400, 'The body must be JSON, e.g. {"eventId": "midnight-arcade-neon-tour", "tickets": 2}.');
+    throw new ApiError(
+      400,
+      optional ? 'The body must be JSON, e.g. {"tickets": 2}, or empty.' : 'The body must be JSON, e.g. {"eventId": "midnight-arcade-neon-tour", "tickets": 2}.',
+    );
   }
   const parsed = schema.safeParse(raw);
   if (!parsed.success) {
@@ -81,8 +95,8 @@ async function readBody<T>(request: Request, schema: z.ZodType<T>): Promise<T> {
 
 const API_REALM = 'Bearer realm="TicketBay API"';
 
-/** The account behind the request's API key, if the key may write. */
-async function writer(deps: ApiDeps, request: Request): Promise<{ userId: string; email: string; name: string }> {
+/** The account behind the request's API key, if the key has the scope. */
+async function keyHolder(deps: ApiDeps, request: Request, scope: "tickets:read" | "tickets:write"): Promise<{ userId: string; email: string; name: string }> {
   const resolved = await resolveCaller({ auth: deps.auth(), db: deps.db }, request);
   if (!resolved.ok) throw new ApiError(401, resolved.error, { "WWW-Authenticate": API_REALM });
   const caller = resolved.caller;
@@ -91,11 +105,19 @@ async function writer(deps: ApiDeps, request: Request): Promise<{ userId: string
       "WWW-Authenticate": API_REALM,
     });
   }
-  if (!caller.scopes.includes("tickets:write")) {
-    throw new ApiError(403, "This API key is read-only. Create a read & write key under Settings → Developers.");
+  if (!caller.scopes.includes(scope)) {
+    throw new ApiError(
+      403,
+      scope === "tickets:write"
+        ? "This API key is read-only. Create a read & write key under Settings → Developers."
+        : "This API key cannot read orders. Create a key under Settings → Developers.",
+    );
   }
   return caller;
 }
+
+/** The account behind the request's API key, if the key may write. */
+const writer = (deps: ApiDeps, request: Request) => keyHolder(deps, request, "tickets:write");
 
 // ---- Output -----------------------------------------------------------------
 
@@ -133,7 +155,23 @@ function priceJson(inv: Invoice) {
   };
 }
 
-function orderJson(o: OrderRow) {
+/** One cancellation, or a quote for one: the same fields, so a client can compare them. */
+function cancellationJson(r: Pick<CancellationQuote, "tickets" | "netCents" | "feeCents" | "releasesSeats">) {
+  return { tickets: r.tickets, refundCents: r.netCents, refundFeeCents: r.feeCents, seatsReleased: r.releasesSeats };
+}
+
+function refundJson(r: RefundRow) {
+  return {
+    ...cancellationJson({ tickets: r.tickets, netCents: r.netCents, feeCents: r.feeCents, releasesSeats: r.seatsReleased }),
+    reason: r.reason,
+    refundedAt: iso(r.createdAtMs),
+  };
+}
+
+/** An order. `refundedAt` and `refundCents` are totals over its refunds (null before the first). */
+function orderJson(o: OrderRow, refunds: RefundRow[]) {
+  const soFar = refundsSoFar(refunds);
+  const last = refunds.reduce<number | null>((at, r) => (at === null || r.createdAtMs > at ? r.createdAtMs : at), null);
   return {
     id: o.id,
     orderNumber: orderNumber(o.id),
@@ -143,8 +181,10 @@ function orderJson(o: OrderRow) {
     discountCode: o.discountCode,
     price: priceJson(o),
     createdAt: iso(o.createdAtMs),
-    refundedAt: o.refundedAtMs === null ? null : iso(o.refundedAtMs),
-    refundCents: o.refundCents,
+    refundedAt: last === null ? null : iso(last),
+    refundCents: refunds.length === 0 ? null : soFar.grossCents - soFar.feeCents,
+    ticketsCancelled: soFar.ticketsCancelled,
+    refunds: refunds.map(refundJson),
   };
 }
 
@@ -231,20 +271,66 @@ export function placeOrderEndpoint(deps: ApiDeps, request: Request): Promise<Res
         idempotencyKey: `api:${caller.userId}:${key.data}`,
       },
     );
-    return Response.json({ replayed, order: orderJson(order) }, { status: replayed ? 200 : 201 });
+    // A replay can be of an order cancelled since: show its refunds too.
+    const refunds = replayed ? await listRefundsForOrder(deps.db, order.id) : [];
+    return Response.json({ replayed, order: orderJson(order, refunds) }, { status: replayed ? 200 : 201 });
   });
 }
 
-/** POST /api/v1/orders/{id}/cancel — cancels one of the caller's own orders and refunds it by the refund rules. */
+/**
+ * POST /api/v1/orders/{id}/cancel — cancels some or all of the tickets on one
+ * of the caller's own orders and refunds them by the refund rules. Body
+ * `{"tickets": N}` with an Idempotency-Key header, or empty for every ticket
+ * left (the header is optional then). A resend of the same key answers with
+ * the first cancellation (`replayed: true`) and cancels nothing more.
+ */
 export function cancelOrderEndpoint(deps: ApiDeps, request: Request, id: string): Promise<Response> {
   return handle(request, async () => {
     const caller = await writer(deps, request);
     // An id that cannot name an order is simply not found — the same answer as someone else's order.
     if (!OrderIdParam.safeParse(id).success) throw new ApiError(404, "Order not found.");
-    const r = await cancelOwnOrder({ db: deps.db, payments: deps.payments, nowMs: deps.now(request) }, caller.userId, Number(id));
+    const body = await readBody(request, CancelBody, { optional: true });
+    const sent = request.headers.get("idempotency-key");
+    const key = IdempotencyKey.safeParse(sent ?? "");
+    // A count means "N more tickets": resent blindly it would cancel N again, so it must come with a key.
+    if (!key.success && (sent !== null || body.tickets !== undefined)) {
+      throw new ApiError(400, "Send an Idempotency-Key header (1-100 characters, unique per cancellation; reuse it only to retry the same cancellation).");
+    }
+    const r = await cancelOwnOrder(
+      { db: deps.db, payments: deps.payments, nowMs: deps.now(request) },
+      caller.userId,
+      Number(id),
+      body.tickets,
+      // Namespaced per user, like an order's: one customer's key can never replay another's cancellation.
+      key.success ? `api:${caller.userId}:${key.data}` : undefined,
+    );
     return Response.json({
-      refund: { refundCents: r.refundCents, refundFeeCents: r.refundFeeCents, seatsReleased: r.seatsReleased },
-      order: orderJson(r.order),
+      replayed: r.replayed,
+      refund: cancellationJson({ tickets: r.tickets, netCents: r.refundCents, feeCents: r.refundFeeCents, releasesSeats: r.seatsReleased }),
+      order: orderJson(r.order, r.refunds),
+    });
+  });
+}
+
+/**
+ * GET /api/v1/orders/{id}/cancel-quote?tickets=N — what cancelling N tickets
+ * (default: every ticket left) of one of the caller's orders would pay right
+ * now. Changes nothing; any key that can read orders may ask.
+ */
+export function cancelQuoteEndpoint(deps: ApiDeps, request: Request, id: string): Promise<Response> {
+  return handle(request, async () => {
+    const caller = await keyHolder(deps, request, "tickets:read");
+    if (!OrderIdParam.safeParse(id).success) throw new ApiError(404, "Order not found.");
+    const raw = new URL(request.url).searchParams.get("tickets");
+    if (raw !== null && !TicketsParam.safeParse(raw).success) {
+      throw new ApiError(400, "tickets: must be a whole number of tickets, at least 1, e.g. ?tickets=2");
+    }
+    const q = await quoteOwnCancel({ db: deps.db, nowMs: deps.now(request) }, caller.userId, Number(id), raw === null ? undefined : Number(raw));
+    return Response.json({
+      orderId: q.order.id,
+      ticketsLeft: q.ticketsLeft,
+      refundWindowOpen: q.windowOpen,
+      refund: cancellationJson(q),
     });
   });
 }

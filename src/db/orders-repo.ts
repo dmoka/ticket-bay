@@ -62,18 +62,15 @@ export async function listPaidOrdersForUpdate(tx: DbLike, eventId: string): Prom
     .for("update");
 }
 
-/** The orders an event cancellation refunded. */
-export async function listCancelRefunds(db: DbLike, eventId: string): Promise<OrderRow[]> {
-  return db
+/** An order and its event, the order row-locked until the transaction ends. */
+export async function getOrderWithEventForUpdate(tx: DbLike, id: number): Promise<{ order: OrderRow; event: EventRow } | undefined> {
+  const [r] = await tx
     .select()
     .from(orders)
-    .where(and(eq(orders.eventId, eventId), eq(orders.refundReason, "event_cancelled")))
-    .orderBy(orders.id);
-}
-
-/** …of those, the ones whose money has not reached the provider yet. */
-export async function listUnpaidCancelRefunds(db: DbLike, eventId: string): Promise<OrderRow[]> {
-  return (await listCancelRefunds(db, eventId)).filter((o) => o.refundId === null && (o.refundCents ?? 0) > 0);
+    .innerJoin(events, eq(orders.eventId, events.id))
+    .where(eq(orders.id, id))
+    .for("update", { of: orders });
+  return r ? { order: r.orders, event: r.events } : undefined;
 }
 
 /** Order ids are Postgres INTEGERs: anything else cannot name an order. */
@@ -94,39 +91,19 @@ export function toDomainOrder(order: OrderRow, event: Pick<EventRow, "startsAtMs
   };
 }
 
-export interface RefundRecord {
-  /** defaults to "customer" */
-  reason?: "customer" | "event_cancelled";
-  atMs: number;
-  refundCents: number;
-  refundFeeCents: number;
-  seatsReleased: boolean;
-}
-
 /**
- * Mark an order refunded, exactly once. Returns true if this call performed the
- * refund, false if it had already been refunded (or does not exist). The guard
- * lives in the WHERE clause, so two callers cannot both win: in Postgres the
- * second UPDATE waits on the first one's row lock, then re-checks
- * `status = 'paid'` against the committed row and matches nothing.
+ * Mark an order refunded — every ticket cancelled — exactly once. Returns true
+ * if this call did it, false if it was already refunded (or does not exist).
+ * The guard lives in the WHERE clause, so two callers cannot both win: in
+ * Postgres the second UPDATE waits on the first one's row lock, then
+ * re-checks `status = 'paid'` against the committed row and matches nothing.
  */
-export async function markRefunded(db: DbLike, id: number, r: RefundRecord): Promise<boolean> {
+export async function markRefunded(db: DbLike, id: number): Promise<boolean> {
   const res = await db
     .update(orders)
-    .set({
-      status: "refunded",
-      refundedAtMs: r.atMs,
-      refundCents: r.refundCents,
-      refundFeeCents: r.refundFeeCents,
-      seatsReleased: r.seatsReleased,
-      refundReason: r.reason ?? "customer",
-    })
+    .set({ status: "refunded" })
     .where(and(eq(orders.id, id), eq(orders.status, "paid")));
   return res.rowCount === 1;
-}
-
-export async function setRefundId(db: DbLike, id: number, refundId: string): Promise<void> {
-  await db.update(orders).set({ refundId }).where(eq(orders.id, id));
 }
 
 export async function isRefunded(db: DbLike, id: number): Promise<boolean> {

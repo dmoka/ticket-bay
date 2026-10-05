@@ -4,7 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { ArrowDown, ArrowUp, ArrowUpRight } from "lucide-react";
-import type { EventRow, OrderRow } from "@/src/db/schema";
+import type { EventRow, OrderRow, RefundRow } from "@/src/db/schema";
 import { dateTime, money, orderNumber } from "@/lib/format";
 import { Mono, SectionLabel, StatusBadge } from "@/components/app/primitives";
 import { InvoiceLines } from "@/components/public/invoice-lines";
@@ -12,7 +12,7 @@ import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
 
-export type OrderWithEvent = { order: OrderRow; event: EventRow };
+export type OrderWithEvent = { order: OrderRow; event: EventRow; refunds: RefundRow[] };
 
 const COLUMNS: { key: string; label: string; sort?: string; right?: boolean }[] = [
   { key: "id", label: "Order" },
@@ -94,38 +94,49 @@ function Peek({ row }: { row: OrderWithEvent }) {
             />
           </div>
         </section>
-        {o.status === "refunded" && (
-          <section>
-            <SectionLabel className="mb-2">Refund</SectionLabel>
+        {row.refunds.map((r, i) => (
+          <section key={r.id}>
+            <SectionLabel className="mb-2">
+              {row.refunds.length === 1 ? "Refund" : `Refund ${i + 1} of ${row.refunds.length}`}
+              {r.reason === "event_cancelled" && " · event cancelled"}
+            </SectionLabel>
             <dl className="grid grid-cols-2 gap-y-1">
               <dt className="text-muted-foreground">Cancelled</dt>
               <dd className="text-right">
-                <Mono>{dateTime(o.refundedAtMs ?? 0)}</Mono>
+                <Mono>{dateTime(r.createdAtMs)}</Mono>
+              </dd>
+              <dt className="text-muted-foreground">Tickets</dt>
+              <dd className="text-right">
+                <Mono>
+                  {r.tickets} of {o.quantity}
+                </Mono>
               </dd>
               <dt className="text-muted-foreground">Paid back</dt>
               <dd className="text-right">
-                <Mono>{money(o.refundCents ?? 0)}</Mono>
+                <Mono>{money(r.netCents)}</Mono>
               </dd>
               <dt className="text-muted-foreground">Fee kept</dt>
               <dd className="text-right">
-                <Mono>{money(o.refundFeeCents ?? 0)}</Mono>
+                <Mono>{money(r.feeCents)}</Mono>
               </dd>
               <dt className="text-muted-foreground">Seats</dt>
-              <dd className="text-right">{o.seatsReleased ? "Released" : "Kept (late)"}</dd>
+              <dd className="text-right">{r.seatsReleased ? "Released" : "Kept (late)"}</dd>
             </dl>
           </section>
-        )}
+        ))}
         <section>
           <SectionLabel className="mb-2">Payment</SectionLabel>
           <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1">
             <dt className="text-muted-foreground">Charge</dt>
             <dd className="truncate text-right font-mono text-[12px]">{o.paymentId}</dd>
-            {o.refundId && (
-              <>
-                <dt className="text-muted-foreground">Refund</dt>
-                <dd className="truncate text-right font-mono text-[12px]">{o.refundId}</dd>
-              </>
-            )}
+            {row.refunds
+              .filter((r) => r.providerRefundId !== null)
+              .map((r) => (
+                <div key={r.id} className="contents">
+                  <dt className="text-muted-foreground">Refund</dt>
+                  <dd className="truncate text-right font-mono text-[12px]">{r.providerRefundId}</dd>
+                </div>
+              ))}
             <dt className="text-muted-foreground">Idempotency key</dt>
             <dd className="truncate text-right font-mono text-[12px]">{o.idempotencyKey}</dd>
           </dl>

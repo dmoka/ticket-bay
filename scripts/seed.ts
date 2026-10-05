@@ -8,7 +8,7 @@ import type { Event } from "../src/domain/booking";
 import { eq, sql } from "drizzle-orm";
 import { createAuth } from "../src/auth/auth";
 import { closeDb, databaseUrl, migrateDb, openDb } from "../src/db/client";
-import { discountCodes, events, orders, user } from "../src/db/schema";
+import { discountCodes, events, orders, refunds, user } from "../src/db/schema";
 import { loadLocalEnv } from "./local-env";
 
 const HOUR = 3_600_000;
@@ -236,6 +236,8 @@ drafts.sort((a, b) => a.createdAtMs - b.createdAtMs);
 const codeUses = new Map<string, number>();
 const seatsSold = new Map<string, number>();
 const rows: (typeof orders.$inferInsert)[] = [];
+/** The refund of a cancelled order, by the order's idempotency key (its id is known only once inserted). */
+const refundOf = new Map<string, Omit<typeof refunds.$inferInsert, "orderId">>();
 let n = 0;
 for (const d of drafts) {
   n++;
@@ -289,18 +291,21 @@ for (const d of drafts) {
         { totalCents: inv.ticketsCents, tickets: d.qty, discountPercent: inv.discountPercent, eventStartMs: d.startMs },
         refundedAtMs,
       );
-      Object.assign(row, {
-        status: "refunded",
-        refundReason: "customer",
-        refundedAtMs,
-        refundCents: p.netCents,
-        refundFeeCents: p.feeCents,
+      row.status = "refunded";
+      refundOf.set(row.idempotencyKey, {
+        tickets: d.qty,
+        grossCents: p.grossCents,
+        feeCents: p.feeCents,
+        netCents: p.netCents,
+        reason: "customer",
+        createdAtMs: refundedAtMs,
         seatsReleased: p.releasesSeats,
-        refundId: p.netCents > 0 ? `re_seed_${hex(24)}` : null,
+        idempotencyKey: `refund-seed-${n}`,
+        providerRefundId: p.netCents > 0 ? `re_seed_${hex(24)}` : null,
       });
     }
   }
-  const holdsSeats = row.status === "paid" || row.seatsReleased === false;
+  const holdsSeats = row.status === "paid" || refundOf.get(row.idempotencyKey)?.seatsReleased === false;
   if (holdsSeats) seatsSold.set(d.ev.id, (seatsSold.get(d.ev.id) ?? 0) + d.qty);
   rows.push(row);
 }
@@ -320,7 +325,7 @@ for (const row of rows) row.userId = accountIds.get(row.customerEmail) ?? null;
 
 await db.transaction(async (tx) => {
   // RESTART IDENTITY: order numbers start again at TB-00001 on every reseed.
-  await tx.execute(sql`TRUNCATE ${orders}, ${discountCodes}, ${events} RESTART IDENTITY`);
+  await tx.execute(sql`TRUNCATE ${refunds}, ${orders}, ${discountCodes}, ${events} RESTART IDENTITY`);
   await tx.insert(events).values(
     EVENTS.map((e) => ({
       id: e.id,
@@ -338,7 +343,12 @@ await db.transaction(async (tx) => {
   );
   await tx.insert(discountCodes).values(CODES.map((c) => ({ ...c, uses: codeUses.get(c.code) ?? 0, createdAtMs: NOW - 70 * DAY })));
   // In creation order, so order numbers follow the timeline.
-  await tx.insert(orders).values(rows);
+  const inserted = await tx.insert(orders).values(rows).returning({ id: orders.id, idempotencyKey: orders.idempotencyKey });
+  const cancelled = inserted.flatMap((o) => {
+    const r = refundOf.get(o.idempotencyKey);
+    return r ? [{ ...r, orderId: o.id }] : [];
+  });
+  if (cancelled.length) await tx.insert(refunds).values(cancelled);
 });
 await closeDb(db);
 

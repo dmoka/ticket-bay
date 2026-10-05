@@ -6,7 +6,7 @@
 //     "tickets:write ", "tickets:*", junk, duplicates, empty) and any private tool,
 //     the tool runs iff the exact scope it needs is in the set:
 //     book_tickets / refund_order / cancel_event need "tickets:write",
-//     my_orders needs "tickets:read". Anonymous callers never run a private tool.
+//     my_orders and quote_refund need "tickets:read". Anonymous callers never run a private tool.
 //  2. A refused call writes nothing: orders, events and the payment provider's
 //     charges are exactly as before, and the refusal is a readable tool error
 //     (isError), not an exception.
@@ -17,7 +17,7 @@ import fc from "fast-check";
 import { sql } from "drizzle-orm";
 import { describe, expect, it } from "vitest";
 import { createEvent } from "../../src/db/events-repo";
-import { discountCodes, events, orders, user } from "../../src/db/schema";
+import { discountCodes, events, orders, user, refunds } from "../../src/db/schema";
 import { createTicketBayServer, PRIVATE_TOOLS, type Caller } from "../../src/mcp/tools";
 import { createFakeStripe, type PaymentProvider } from "../../src/payments";
 import { placeOrder } from "../../src/services/orders";
@@ -30,6 +30,7 @@ const DAY = 86_400_000;
 const NEEDS: Record<(typeof PRIVATE_TOOLS)[number], string> = {
   book_tickets: "tickets:write",
   my_orders: "tickets:read",
+  quote_refund: "tickets:read",
   refund_order: "tickets:write",
   cancel_event: "tickets:write",
 };
@@ -71,7 +72,7 @@ describe("private tools and key scopes", () => {
       await t.db.insert(user).values({ id: "u-admin", name: "Ada Admin", email: "ada@example.com", role: "admin" }).onConflictDoNothing();
       await fc.assert(
         fc.asyncProperty(fc.option(scopeSet, { nil: null, freq: 8 }), fc.constantFrom(...PRIVATE_TOOLS), async (scopes, tool) => {
-          await t.db.execute(sql`TRUNCATE ${orders}, ${discountCodes}, ${events} RESTART IDENTITY`);
+          await t.db.execute(sql`TRUNCATE ${refunds}, ${orders}, ${discountCodes}, ${events} RESTART IDENTITY`);
           const payments = createFakeStripe("sk_test_property");
           await createEvent(t.db, {
             id: "ev",
@@ -93,7 +94,8 @@ describe("private tools and key scopes", () => {
           const args = {
             book_tickets: { event_id: "ev", quantity: 1, idempotency_key: "scope-test" },
             my_orders: {},
-            refund_order: { order_id: order.id },
+            quote_refund: { order_id: order.id },
+            refund_order: { order_id: order.id, tickets: 1, idempotency_key: crypto.randomUUID() },
             cancel_event: { event_id: "ev" },
           }[tool];
 

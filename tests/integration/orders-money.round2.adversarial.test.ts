@@ -4,12 +4,11 @@
 import { randomUUID } from "node:crypto";
 import { describe, it, expect } from "vitest";
 import { sql } from "drizzle-orm";
-import { getOrder } from "../../src/db/orders-repo";
 import { user } from "../../src/db/schema";
 import { createFakeStripe, type Charge, type PaymentProvider } from "../../src/payments";
 import { cancelEvent, cancelOwnOrder, OrderError, placeOrder, type Deps } from "../../src/services/orders";
 import { useTestDatabase } from "./database";
-import { DAY, NOW, venue } from "./fixtures";
+import { DAY, NOW, venue, getOrderRefunded } from "./fixtures";
 
 const t = useTestDatabase();
 
@@ -146,7 +145,7 @@ describe("ADVERSARIAL round 2: resumable cancelEvent payouts", () => {
     await Promise.allSettled([cancelEvent(deps(p), ev.id), cancelEvent(deps(p), ev.id), cancelEvent(deps(p), ev.id)]);
     for (const o of orders) {
       expect(inner.getCharge(o.paymentId)!.refundedCents, `order ${o.id}`).toBe(o.ticketsCents);
-      expect((await getOrder(t.db, o.id))!.refundId).not.toBeNull();
+      expect((await getOrderRefunded(t.db, o.id))!.refundId).not.toBeNull();
     }
     await expect(cancelEvent(deps(p), ev.id)).rejects.toThrow(/already cancelled/);
   });
@@ -198,7 +197,7 @@ describe("ADVERSARIAL round 2: resumable cancelEvent payouts", () => {
     const ev = await venue(t.db);
     const o = await book(inner, ev.id, await newUser());
     await expect(cancelEvent(deps(inner, ev.startsAtMs), ev.id)).rejects.toThrow(/already started/);
-    expect((await getOrder(t.db, o.id))!.status).toBe("paid");
+    expect((await getOrderRefunded(t.db, o.id))!.status).toBe("paid");
   });
 });
 
@@ -214,7 +213,7 @@ describe("ADVERSARIAL round 2: a customer's own refund (refund_order) that fails
     down = false;
     // The customer / their agent tries again, the only way they can.
     await cancelOwnOrder(deps(p), uid, o.id).catch(() => undefined);
-    const row = (await getOrder(t.db, o.id))!;
+    const row = (await getOrderRefunded(t.db, o.id))!;
     expect(row.status).toBe("refunded");
     expect(inner.getCharge(o.paymentId)!.refundedCents, "marked refunded, money never sent").toBe(row.refundCents);
   });

@@ -6,13 +6,13 @@ import { describe, it, expect } from "vitest";
 import { createMcpHandler } from "@modelcontextprotocol/server";
 import { eq } from "drizzle-orm";
 import { getEvent } from "../../src/db/events-repo";
-import { getOrder, listOrdersByUser } from "../../src/db/orders-repo";
+import { listOrdersByUser } from "../../src/db/orders-repo";
 import { orders } from "../../src/db/schema";
 import { createFakeStripe, PaymentError, type PaymentProvider } from "../../src/payments";
 import { createTicketBayServer, UNAUTHENTICATED_MESSAGE, type Caller } from "../../src/mcp/tools";
 import { cancelEvent, cancelOwnOrder, OrderError, placeOrder, quoteOrder, type Deps } from "../../src/services/orders";
 import { useTestDatabase } from "./database";
-import { DAY, HOUR, NOW, venue } from "./fixtures";
+import { DAY, HOUR, NOW, venue, getOrderRefunded } from "./fixtures";
 import { BASE_URL, customer, makeAuth, readReply, toolCallRequest, toolResult, useCleanAccounts } from "./accounts";
 
 const t = useTestDatabase();
@@ -50,7 +50,7 @@ describe("cancelOwnOrder", () => {
     expect(order.userId).toBe(anna.id);
 
     expect(await refused(cancelOwnOrder(d, bela.id, order.id))).toBe("Order not found.");
-    const still = (await getOrder(t.db, order.id))!;
+    const still = (await getOrderRefunded(t.db, order.id))!;
     expect(still.status).toBe("paid");
     expect(still.refundCents).toBeNull();
     expect((await getEvent(t.db, ev.id))!.seatsSold).toBe(42);
@@ -68,7 +68,7 @@ describe("cancelOwnOrder", () => {
     const { order } = await bookAs(d, undefined, ev.id, 1);
     expect(order.userId).toBeNull();
     expect(await refused(cancelOwnOrder(d, anna.id, order.id))).toBe("Order not found.");
-    expect((await getOrder(t.db, order.id))!.status).toBe("paid");
+    expect((await getOrderRefunded(t.db, order.id))!.status).toBe("paid");
   });
 
   it("refuses non-integer and unknown ids without touching the database rows", async () => {
@@ -140,7 +140,7 @@ describe("cancelEvent", () => {
     expect(r.event.seatsSold).toBe(40);
 
     for (const o of [a, b]) {
-      const row = (await getOrder(t.db, o.id))!;
+      const row = (await getOrderRefunded(t.db, o.id))!;
       expect(row.status).toBe("refunded");
       expect(row.refundCents).toBe(o.ticketsCents);
       expect(row.refundFeeCents).toBe(0);
@@ -151,11 +151,11 @@ describe("cancelEvent", () => {
       expect(charge?.refundedCents).toBe(o.ticketsCents);
     }
     // The order refunded earlier keeps its own (fee-reduced) refund, not a second one.
-    const g = (await getOrder(t.db, gone.id))!;
+    const g = (await getOrderRefunded(t.db, gone.id))!;
     expect(g.refundCents).toBe(4900);
     expect(g.refundedAtMs).toBe(NOW);
     // Other events are not touched.
-    expect((await getOrder(t.db, untouched.id))!.status).toBe("paid");
+    expect((await getOrderRefunded(t.db, untouched.id))!.status).toBe("paid");
     expect((await getEvent(t.db, other.id))!.cancelledAtMs).toBeNull();
 
     // Sales are closed: no quote, no booking, no second cancellation.
@@ -174,7 +174,7 @@ describe("cancelEvent", () => {
     const r = await cancelEvent({ ...d, nowMs: lastMs }, ev.id);
     expect(r.refundedOrders).toBe(1);
     expect(r.refundedCents).toBe(order.ticketsCents);
-    const row = (await getOrder(t.db, order.id))!;
+    const row = (await getOrderRefunded(t.db, order.id))!;
     expect(row).toMatchObject({ status: "refunded", refundCents: order.ticketsCents, refundFeeCents: 0, seatsReleased: true });
     expect(row.refundId).not.toBeNull();
     expect((await getEvent(t.db, ev.id))!).toMatchObject({ cancelledAtMs: lastMs, seatsSold: 40 });
@@ -195,7 +195,7 @@ describe("cancelEvent", () => {
     expect(msg).toMatch(/already started/);
 
     expect((await getEvent(t.db, ev.id))!).toMatchObject({ cancelledAtMs: null, seatsSold: 42 });
-    const row = (await getOrder(t.db, order.id))!;
+    const row = (await getOrderRefunded(t.db, order.id))!;
     expect(row).toMatchObject({ status: "paid", refundCents: null, refundedAtMs: null, refundId: null });
     expect(payments.getCharge(order.paymentId)!.refundedCents).toBe(0);
   });
@@ -216,7 +216,7 @@ describe("cancelEvent", () => {
     const { order } = await bookAs(d, anna.id, ev.id, 2);
     await cancelEvent(d, ev.id);
     expect(await refused(cancelOwnOrder(d, anna.id, order.id))).toContain("already been refunded");
-    const [row] = await t.db.select().from(orders).where(eq(orders.id, order.id));
+    const row = await getOrderRefunded(t.db, order.id);
     expect(row!.refundCents).toBe(order.ticketsCents);
   });
 
@@ -269,10 +269,10 @@ describe("cancelEvent payouts are resumable", () => {
 
     // The event is cancelled and every order is marked refunded; only b's money is still owed.
     expect((await getEvent(t.db, ev.id))!).toMatchObject({ cancelledAtMs: NOW + HOUR, seatsSold: 40 });
-    for (const o of [a, b, c]) expect((await getOrder(t.db, o.id))!.status).toBe("refunded");
-    expect((await getOrder(t.db, a.id))!.refundId).not.toBeNull();
-    expect((await getOrder(t.db, c.id))!.refundId).not.toBeNull();
-    expect((await getOrder(t.db, b.id))!.refundId).toBeNull();
+    for (const o of [a, b, c]) expect((await getOrderRefunded(t.db, o.id))!.status).toBe("refunded");
+    expect((await getOrderRefunded(t.db, a.id))!.refundId).not.toBeNull();
+    expect((await getOrderRefunded(t.db, c.id))!.refundId).not.toBeNull();
+    expect((await getOrderRefunded(t.db, b.id))!.refundId).toBeNull();
     expect(p.inner.getCharge(b.paymentId)!.refundedCents).toBe(0);
     // Sales stay closed while a payout is owed.
     expect(await refused(bookAs({ ...d, nowMs: NOW + 2 * HOUR }, bela.id, ev.id, 1))).toBe("This event has been cancelled.");
@@ -290,7 +290,7 @@ describe("cancelEvent payouts are resumable", () => {
     expect(r.refundedOrders).toBe(3);
     expect(r.refundedCents).toBe(a.ticketsCents + b.ticketsCents + c.ticketsCents);
     for (const o of [a, b, c]) {
-      const row = (await getOrder(t.db, o.id))!;
+      const row = (await getOrderRefunded(t.db, o.id))!;
       expect(row.refundId).not.toBeNull();
       expect(row.refundCents).toBe(o.ticketsCents);
       expect(row.refundedAtMs).toBe(NOW + HOUR);
@@ -318,7 +318,7 @@ describe("cancelEvent payouts are resumable", () => {
     const r = await cancelEvent({ ...d, nowMs: NOW + 2 * HOUR }, ev.id);
     expect(r.refundedOrders).toBe(1);
     expect(r.refundedCents).toBe(b.ticketsCents);
-    expect(p.inner.getCharge(own.paymentId)!.refundedCents).toBe(own.ticketsCents - (await getOrder(t.db, own.id))!.refundFeeCents!);
+    expect(p.inner.getCharge(own.paymentId)!.refundedCents).toBe(own.ticketsCents - (await getOrderRefunded(t.db, own.id))!.refundFeeCents!);
     expect(p.inner.getCharge(b.paymentId)!.refundedCents).toBe(b.ticketsCents);
   });
 });
@@ -437,7 +437,7 @@ describe("the tools' own guard (no route in front)", () => {
   it.each([
     ["book_tickets", { event_id: "x", quantity: 1 }],
     ["my_orders", {}],
-    ["refund_order", { order_id: 1 }],
+    ["refund_order", { order_id: 1, tickets: 1, idempotency_key: crypto.randomUUID() }],
     ["cancel_event", { event_id: "x" }],
   ])("anonymous %s returns the 401-style tool error and writes nothing", async (tool, args) => {
     const ev = await venue(t.db);

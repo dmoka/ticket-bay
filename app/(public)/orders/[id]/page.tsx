@@ -1,9 +1,11 @@
+import { randomUUID } from "node:crypto";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { CheckCircle2 } from "lucide-react";
 import { getDb } from "@/src/db/client";
 import { getOrderWithEvent, isOrderId, toDomainOrder } from "@/src/db/orders-repo";
-import { previewCancellation } from "@/src/domain/cancellation";
+import { listRefundsForOrder } from "@/src/db/refunds-repo";
+import { quoteCancellation, refundsSoFar } from "@/src/domain/cancellation";
 import { now } from "@/lib/clock";
 import { requireSession } from "@/lib/auth";
 import { date, dateTime, money, orderNumber, time } from "@/lib/format";
@@ -30,7 +32,11 @@ export default async function OrderPage({
   if (!found || found.order.userId !== session.user.id) notFound();
   const { order, event: ev } = found;
   const nowMs = await now();
-  const preview = order.status === "paid" ? previewCancellation(toDomainOrder(order, ev), nowMs) : null;
+  const refunds = await listRefundsForOrder(getDb(), order.id);
+  const soFar = refundsSoFar(refunds);
+  const ticketsLeft = order.quantity - soFar.ticketsCancelled;
+  // What cancelling every ticket left pays right now: the same domain function the cancel uses.
+  const quote = order.status === "paid" && ticketsLeft > 0 ? quoteCancellation(toDomainOrder(order, ev), soFar, ticketsLeft, nowMs) : null;
 
   return (
     <div className="mx-auto max-w-3xl">
@@ -85,7 +91,10 @@ export default async function OrderPage({
             </div>
             <div className="mt-4 flex items-baseline justify-between text-[13px]">
               <span className="text-muted-foreground">Tickets</span>
-              <span className="font-mono tabular-nums">{order.quantity}</span>
+              <span className="font-mono tabular-nums">
+                {order.quantity}
+                {soFar.ticketsCancelled > 0 && <span className="text-muted-foreground"> · {soFar.ticketsCancelled} cancelled</span>}
+              </span>
             </div>
           </Link>
 
@@ -129,51 +138,56 @@ export default async function OrderPage({
 
       <section className="mt-8">
         <SectionLabel className="mb-3">Cancellation</SectionLabel>
-        <div className="surface p-5">
-          {order.status === "refunded" ? (
-            <div className="space-y-1.5 text-[14px]">
+        <div className="surface divide-y divide-border">
+          {refunds.length > 0 && (
+            <div className="space-y-1.5 p-5 text-[14px]">
               <p className="flex items-baseline justify-between font-medium" data-testid="refund-line">
                 <span>Refunded</span>{" "}
                 <span className="font-mono tabular-nums" data-testid="refund-amount">
-                  {money(order.refundCents ?? 0)}
+                  {money(soFar.grossCents - soFar.feeCents)}
                 </span>
               </p>
               <p className="flex items-baseline justify-between text-[13px] text-muted-foreground">
                 <span>Refund fee kept</span>
-                <span className="font-mono tabular-nums">{money(order.refundFeeCents ?? 0)}</span>
+                <span className="font-mono tabular-nums">{money(soFar.feeCents)}</span>
               </p>
-              <p className="pt-1 text-[13px] text-muted-foreground">
-                Cancelled <span className="font-mono tabular-nums">{dateTime(order.refundedAtMs ?? 0)}</span>.{" "}
-                {order.seatsReleased
-                  ? "The seats went back on sale."
-                  : "Cancelled after the event started — no refund, and the seats stay yours."}
-              </p>
+              {refunds.length === 1 && refunds[0].tickets === order.quantity ? (
+                <p className="pt-1 text-[13px] text-muted-foreground">
+                  Cancelled <span className="font-mono tabular-nums">{dateTime(refunds[0].createdAtMs)}</span>.{" "}
+                  {refunds[0].seatsReleased
+                    ? "The seats went back on sale."
+                    : "Cancelled after the event started — no refund, and the seats stay yours."}
+                </p>
+              ) : (
+                <ul className="space-y-1 pt-1 text-[13px] text-muted-foreground" data-testid="refund-list">
+                  {refunds.map((r) => (
+                    <li key={r.id} className="flex items-baseline justify-between gap-4">
+                      <span>
+                        <span className="font-mono tabular-nums">{dateTime(r.createdAtMs)}</span> · {r.tickets} {r.tickets === 1 ? "ticket" : "tickets"}
+                        {r.reason === "event_cancelled" && " · the event was cancelled, no fee"}
+                        {!r.seatsReleased && " · after the event started — no refund, and the seats stay yours"}
+                      </span>
+                      <span className="font-mono tabular-nums">
+                        {money(r.netCents)}
+                        {r.feeCents > 0 && <span> (fee {money(r.feeCents)})</span>}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
-          ) : (
-            preview && (
-              <div className="flex items-center justify-between gap-6">
-                <div className="text-[13px]">
-                  {preview.windowOpen ? (
-                    <p>
-                      Cancel now and get <span className="font-mono font-medium tabular-nums">{money(preview.netCents)}</span> back
-                      <span className="text-muted-foreground">
-                        {" "}
-                        — <span className="font-mono tabular-nums">{money(preview.grossCents)}</span> for the tickets less a{" "}
-                        <span className="font-mono tabular-nums">{money(preview.feeCents)}</span> refund fee. The service fee is not refundable.
-                      </span>
-                    </p>
-                  ) : (
-                    <p>
-                      <span className="font-medium">The refund window has closed.</span>{" "}
-                      <span className="text-muted-foreground">
-                        Refunds close when the event starts. Cancelling now refunds <span className="font-mono tabular-nums">{money(0)}</span> and the seats stay yours.
-                      </span>
-                    </p>
-                  )}
-                </div>
-                <CancelForm orderId={order.id} />
-              </div>
-            )
+          )}
+          {quote && (
+            <div className="p-5">
+              <CancelForm
+                key={ticketsLeft}
+                orderId={order.id}
+                idempotencyKey={randomUUID()}
+                ticketsLeft={ticketsLeft}
+                wholeOrder={soFar.ticketsCancelled === 0}
+                initial={{ tickets: quote.tickets, windowOpen: quote.windowOpen, grossCents: quote.grossCents, feeCents: quote.feeCents, netCents: quote.netCents }}
+              />
+            </div>
           )}
         </div>
       </section>

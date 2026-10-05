@@ -34,9 +34,9 @@
 // the shrunk counterexample. FC_SEED=<n> explores a different stream.
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from "vitest";
 import fc from "fast-check";
-import { like } from "drizzle-orm";
+import { inArray, like } from "drizzle-orm";
 import type { Auth } from "../../src/auth/auth";
-import { events, orders } from "../../src/db/schema";
+import { events, orders, refunds } from "../../src/db/schema";
 import { createFakeStripe, type PaymentProvider } from "../../src/payments";
 import { customer, makeAuth, revokeKey, scopedKey, useCleanAccounts, type Customer } from "../integration/accounts";
 import { useTestDatabase } from "../integration/database";
@@ -599,7 +599,9 @@ class CancelOwn implements fc.AsyncCommand<Model, Real> {
     } else {
       expect(r.status, r.text).toBe(200);
       const started = m.now >= startOf(o.ev);
-      expect(r.body.refund).toEqual(started ? { refundCents: 0, refundFeeCents: 0, seatsReleased: false } : { ...modelRefund(o.ticketsCents), seatsReleased: true });
+      expect(r.body.refund).toEqual(
+        started ? { tickets: o.tickets, refundCents: 0, refundFeeCents: 0, seatsReleased: false } : { tickets: o.tickets, ...modelRefund(o.ticketsCents), seatsReleased: true },
+      );
       o.refunded = true;
       o.seatsKept = started;
     }
@@ -671,16 +673,19 @@ async function checkInvariants(m: Model, real: Real) {
   // A reused Idempotency-Key never makes a second order: the database holds exactly the model's orders.
   expect(rows.map((o) => o.id).sort((x, y) => x - y)).toEqual(m.orders.map((o) => o.id).sort((x, y) => x - y));
 
+  const refundRows = rows.length ? await t.db.select().from(refunds).where(inArray(refunds.orderId, rows.map((o) => o.id))) : [];
+  const refundsOf = (id: number) => refundRows.filter((r) => r.orderId === id);
+  /** seats an order still holds: its tickets less those a refund put back on sale */
+  const held = (o: (typeof rows)[number]) => o.quantity - refundsOf(o.id).reduce((s, r) => s + (r.seatsReleased ? r.tickets : 0), 0);
   for (const e of evs) {
-    const holding = rows.filter((o) => o.eventId === e.id && (o.status === "paid" || o.seatsReleased === false));
     expect(e.seatsSold, `${e.id}: seats sold`).toBeLessThanOrEqual(e.totalSeats);
-    expect(e.seatsSold, `${e.id}: seats sold = seats the orders hold`).toBe(holding.reduce((s, o) => s + o.quantity, 0));
+    expect(e.seatsSold, `${e.id}: seats sold = seats the orders hold`).toBe(rows.filter((o) => o.eventId === e.id).reduce((s, o) => s + held(o), 0));
   }
   for (const o of rows) {
-    if (o.status !== "refunded") continue;
     const e = evs.find((x) => x.id === o.eventId)!;
-    expect(o.refundCents! + o.refundFeeCents!, `order ${o.id}: refund + fee ≤ tickets paid`).toBeLessThanOrEqual(o.ticketsCents);
-    if (o.refundedAtMs! >= e.startsAtMs) expect(o.refundCents, `order ${o.id}: refunded after the start`).toBe(0);
+    const mine = refundsOf(o.id);
+    expect(mine.reduce((s, r) => s + r.netCents + r.feeCents, 0), `order ${o.id}: refund + fee ≤ tickets paid`).toBeLessThanOrEqual(o.ticketsCents);
+    for (const r of mine) if (r.createdAtMs >= e.startsAtMs) expect(r.netCents, `order ${o.id}: refunded after the start`).toBe(0);
   }
 
   // Money is conserved: what the provider holds is what the live orders hold.
@@ -689,7 +694,7 @@ async function checkInvariants(m: Model, real: Real) {
     const c = (await payments.getCharge(id))!;
     atProvider += c.amountCents - c.refundedCents;
   }
-  const inOrders = rows.reduce((s, o) => s + o.totalCents - (o.refundCents ?? 0), 0);
+  const inOrders = rows.reduce((s, o) => s + o.totalCents - refundsOf(o.id).reduce((n, r) => n + r.netCents, 0), 0);
   expect(atProvider, "charges − refunds at the provider = totals − refunds of the orders").toBe(inOrders);
 }
 

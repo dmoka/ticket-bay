@@ -3,7 +3,10 @@
 // easy to test, and every sum stays in integer cents.
 import { and, asc, desc, eq, ilike, or, sql, type SQL } from "drizzle-orm";
 import type { DbLike } from "./client";
-import { discountCodes, events, orders, type DiscountCodeRow, type EventRow, type OrderRow } from "./schema";
+import { eventCancellationRefund, refundsSoFar } from "../domain/cancellation";
+import { toDomainOrder } from "./orders-repo";
+import { listRefundsForOrders } from "./refunds-repo";
+import { discountCodes, events, orders, refunds, type DiscountCodeRow, type EventRow, type OrderRow, type RefundRow } from "./schema";
 
 const DAY = 86_400_000;
 
@@ -34,6 +37,7 @@ export interface Overview {
   periodStartMs: number;
   revenue: Kpi;
   tickets: Kpi;
+  /** net paid back, by when it was refunded; count = cancellations */
   refunds: Kpi & { count: number };
   /** basis points (0-10000) so the ratio stays an integer */
   sellThrough: Kpi;
@@ -42,7 +46,7 @@ export interface Overview {
   recent: { order: OrderRow; event: EventRow }[];
 }
 
-function sumIn(rows: OrderRow[], from: number, to: number, at: (o: OrderRow) => number | null, value: (o: OrderRow) => number) {
+function sumIn<T>(rows: T[], from: number, to: number, at: (o: T) => number | null, value: (o: T) => number) {
   let s = 0;
   for (const o of rows) {
     const t = at(o);
@@ -52,27 +56,26 @@ function sumIn(rows: OrderRow[], from: number, to: number, at: (o: OrderRow) => 
 }
 
 /** Seats held at instant T over total capacity, in basis points. */
-function sellThroughAt(rows: OrderRow[], capacity: number, t: number): number {
+function sellThroughAt(rows: OrderRow[], refundRows: RefundRow[], capacity: number, t: number): number {
   let held = 0;
-  for (const o of rows) {
-    if (o.createdAtMs <= t) held += o.quantity;
-    if (o.refundedAtMs !== null && o.refundedAtMs <= t && o.seatsReleased) held -= o.quantity;
-  }
+  for (const o of rows) if (o.createdAtMs <= t) held += o.quantity;
+  for (const r of refundRows) if (r.createdAtMs <= t && r.seatsReleased) held -= r.tickets;
   return capacity > 0 ? Math.round((held * 10_000) / capacity) : 0;
 }
 
 export async function getOverview(db: DbLike, nowMs: number, days: number): Promise<Overview> {
   const allOrders = await db.select().from(orders);
+  const allRefunds = await db.select().from(refunds);
   const allEvents = await db.select().from(events).orderBy(asc(events.startsAtMs));
   const capacity = allEvents.reduce((s, e) => s + e.totalSeats, 0);
   const start = nowMs - days * DAY;
   const prevStart = start - days * DAY;
 
   const created = (o: OrderRow) => o.createdAtMs;
-  const refunded = (o: OrderRow) => o.refundedAtMs;
   const revenue = (o: OrderRow) => o.totalCents;
   const qty = (o: OrderRow) => o.quantity;
-  const refund = (o: OrderRow) => o.refundCents ?? 0;
+  const refunded = (r: RefundRow) => r.createdAtMs;
+  const refund = (r: RefundRow) => r.netCents;
 
   const daily: DayPoint[] = [];
   for (let i = 0; i < days; i++) {
@@ -83,7 +86,7 @@ export async function getOverview(db: DbLike, nowMs: number, days: number): Prom
       revenueCents: sumIn(allOrders, a, b, created, revenue),
       prevRevenueCents: sumIn(allOrders, a - days * DAY, b - days * DAY, created, revenue),
       tickets: sumIn(allOrders, a, b, created, qty),
-      refundsCents: sumIn(allOrders, a, b, refunded, refund),
+      refundsCents: sumIn(allRefunds, a, b, refunded, refund),
     });
   }
 
@@ -118,15 +121,15 @@ export async function getOverview(db: DbLike, nowMs: number, days: number): Prom
       series: daily.map((d) => d.tickets),
     },
     refunds: {
-      cur: sumIn(allOrders, start, nowMs, refunded, refund),
-      prev: sumIn(allOrders, prevStart, start, refunded, refund),
-      count: sumIn(allOrders, start, nowMs, refunded, () => 1),
+      cur: sumIn(allRefunds, start, nowMs, refunded, refund),
+      prev: sumIn(allRefunds, prevStart, start, refunded, refund),
+      count: sumIn(allRefunds, start, nowMs, refunded, () => 1),
       series: daily.map((d) => d.refundsCents),
     },
     sellThrough: {
-      cur: sellThroughAt(allOrders, capacity, nowMs),
-      prev: sellThroughAt(allOrders, capacity, start),
-      series: daily.map((d) => sellThroughAt(allOrders, capacity, d.dayStartMs + DAY)),
+      cur: sellThroughAt(allOrders, allRefunds, capacity, nowMs),
+      prev: sellThroughAt(allOrders, allRefunds, capacity, start),
+      series: daily.map((d) => sellThroughAt(allOrders, allRefunds, capacity, d.dayStartMs + DAY)),
     },
     daily,
     topEvents: [...byEvent.values()].filter((p) => p.orders > 0).sort((a, b) => b.revenueCents - a.revenueCents).slice(0, 6),
@@ -137,8 +140,10 @@ export async function getOverview(db: DbLike, nowMs: number, days: number): Prom
 export interface EventAdminRow {
   event: EventRow;
   revenueCents: number;
+  /** net paid back on the event's orders, partial cancels included */
   refundedCents: number;
   orders: number;
+  /** orders with every ticket cancelled */
   refunds: number;
 }
 
@@ -151,37 +156,51 @@ export async function listEventsAdmin(db: DbLike): Promise<EventAdminRow[]> {
     .select({
       eventId: orders.eventId,
       revenueCents: total(sql`sum(${orders.totalCents})`),
-      refundedCents: total(sql`sum(${orders.refundCents})`),
       orders: total(sql`count(*)`),
       refunds: total(sql`sum(case when ${orders.status} = 'refunded' then 1 else 0 end)`),
     })
     .from(orders)
     .groupBy(orders.eventId);
+  const refunded = await db
+    .select({ eventId: orders.eventId, cents: total(sql`sum(${refunds.netCents})`) })
+    .from(refunds)
+    .innerJoin(orders, eq(refunds.orderId, orders.id))
+    .groupBy(orders.eventId);
   const byId = new Map(stats.map((s) => [s.eventId, s]));
+  const refundedById = new Map(refunded.map((r) => [r.eventId, r.cents]));
   const rows = await db.select().from(events).orderBy(asc(events.startsAtMs));
   return rows.map((event) => {
     const s = byId.get(event.id);
     return {
       event,
       revenueCents: s?.revenueCents ?? 0,
-      refundedCents: s?.refundedCents ?? 0,
+      refundedCents: refundedById.get(event.id) ?? 0,
       orders: s?.orders ?? 0,
       refunds: s?.refunds ?? 0,
     };
   });
 }
 
-/** What cancelling an event would do: the paid orders and the ticket money to return. */
+/**
+ * What cancelling an event would do: the orders with tickets left, those
+ * tickets, and the ticket money to return — priced by the same domain rule
+ * the cancellation pays with.
+ */
 export async function cancelImpact(db: DbLike, eventId: string): Promise<{ orders: number; tickets: number; refundCents: number }> {
-  const [r] = await db
-    .select({
-      orders: total(sql`count(*)`),
-      tickets: total(sql`sum(${orders.quantity})`),
-      refundCents: total(sql`sum(${orders.ticketsCents})`),
-    })
+  const rows = await db
+    .select()
     .from(orders)
-    .where(sql`${orders.eventId} = ${eventId} and ${orders.status} = 'paid'`);
-  return r ?? { orders: 0, tickets: 0, refundCents: 0 };
+    .innerJoin(events, eq(orders.eventId, events.id))
+    .where(and(eq(orders.eventId, eventId), eq(orders.status, "paid")));
+  const histories = await listRefundsForOrders(db, rows.map((r) => r.orders.id));
+  let tickets = 0;
+  let refundCents = 0;
+  for (const { orders: o, events: ev } of rows) {
+    const r = eventCancellationRefund(toDomainOrder(o, ev), refundsSoFar(histories.get(o.id)!));
+    tickets += r.tickets;
+    refundCents += r.netCents;
+  }
+  return { orders: rows.length, tickets, refundCents };
 }
 
 export type OrderSort = "created" | "total" | "quantity" | "event";
@@ -195,7 +214,10 @@ export interface OrderFilter {
   offset?: number;
 }
 
-export async function listOrdersAdmin(db: DbLike, f: OrderFilter): Promise<{ rows: { order: OrderRow; event: EventRow }[]; total: number }> {
+export async function listOrdersAdmin(
+  db: DbLike,
+  f: OrderFilter,
+): Promise<{ rows: { order: OrderRow; event: EventRow; refunds: RefundRow[] }[]; total: number }> {
   const where: SQL[] = [];
   if (f.status) where.push(eq(orders.status, f.status));
   if (f.eventId) where.push(eq(orders.eventId, f.eventId));
@@ -217,17 +239,19 @@ export async function listOrdersAdmin(db: DbLike, f: OrderFilter): Promise<{ row
     .limit(f.limit ?? 50)
     .offset(f.offset ?? 0);
   const [count] = await db.select({ n: total(sql`count(*)`) }).from(orders).where(cond);
-  return { rows: rows.map((r) => ({ order: r.orders, event: r.events })), total: count?.n ?? 0 };
+  const byOrder = await listRefundsForOrders(db, rows.map((r) => r.orders.id));
+  return { rows: rows.map((r) => ({ order: r.orders, event: r.events, refunds: byOrder.get(r.orders.id)! })), total: count?.n ?? 0 };
 }
 
-export async function listRefunds(db: DbLike): Promise<{ order: OrderRow; event: EventRow }[]> {
+/** Every cancellation, newest first, with its order and event. */
+export async function listRefunds(db: DbLike): Promise<{ refund: RefundRow; order: OrderRow; event: EventRow }[]> {
   const rows = await db
     .select()
-    .from(orders)
+    .from(refunds)
+    .innerJoin(orders, eq(refunds.orderId, orders.id))
     .innerJoin(events, eq(orders.eventId, events.id))
-    .where(eq(orders.status, "refunded"))
-    .orderBy(desc(orders.refundedAtMs));
-  return rows.map((r) => ({ order: r.orders, event: r.events }));
+    .orderBy(desc(refunds.createdAtMs), desc(refunds.id));
+  return rows.map((r) => ({ refund: r.refunds, order: r.orders, event: r.events }));
 }
 
 export interface CodeAdminRow {

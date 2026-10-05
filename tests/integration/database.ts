@@ -8,7 +8,7 @@ import { Client } from "pg";
 import { afterAll, beforeAll, beforeEach, inject } from "vitest";
 import { sql } from "drizzle-orm";
 import { closeDb, openDb, type Db } from "../../src/db/client";
-import { discountCodes, events, orders } from "../../src/db/schema";
+import { discountCodes, events, orders, refunds } from "../../src/db/schema";
 
 async function admin<T>(run: (c: Client) => Promise<T>): Promise<T> {
   const c = new Client({ connectionString: inject("adminDatabaseUrl") });
@@ -43,7 +43,7 @@ export function useTestDatabase({ truncate = true }: { truncate?: boolean } = {}
   });
 
   beforeEach(async () => {
-    if (truncate) await db!.execute(sql`TRUNCATE ${orders}, ${discountCodes}, ${events} RESTART IDENTITY`);
+    if (truncate) await db!.execute(sql`TRUNCATE ${refunds}, ${orders}, ${discountCodes}, ${events} RESTART IDENTITY`);
   });
 
   afterAll(async () => {
