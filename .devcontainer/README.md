@@ -23,7 +23,7 @@ Prefer an editor? VS Code and Cursor open the same box with "Reopen in Container
 ./box claude mcp add --scope project playwright -- npx @playwright/mcp@0.0.83 --browser chromium
 ```
 
-**The brain in the box (module 5).** The box keeps its own copy of your second brain, in its own volume (`/home/node/brain`), cloned from your brain repo. It never mounts the brain folder on your laptop. Every time the box starts, `brain-start.sh` clones the brain the first time and pulls it after that, then runs the brain's `install.sh` with `CLAUDE_DIR=/home/node/.claude`, so Claude Code in the box gets the brain's skills and the pointer line. Your laptop's `~/.claude` is not touched. In the box, `./sync.sh` (in `/home/node/brain`) commits and pushes with the box's own deploy key; your laptop gets the box's changes at its next pull.
+**The brain in the box (module 5).** The box keeps its own copy of your second brain, in its own volume (`/home/node/brain`), cloned from your brain repo. It never mounts the brain folder on your laptop. Every time the box starts, `brain-start.sh` clones the brain the first time and pulls it after that, then runs the brain's install script (`node install.mjs`) with `CLAUDE_DIR=/home/node/.claude`, so Claude Code in the box gets the brain's skills and the pointer line. Your laptop's `~/.claude` is not touched. In the box, `node sync.mjs` (in `/home/node/brain`) commits and pushes with the box's own deploy key; your laptop gets the box's changes at its next pull.
 
 🙋 **Give the box its deploy key (once):**
 1. Make a key pair just for the box, with no passphrase, and name your brain repo:
@@ -35,7 +35,7 @@ Prefer an editor? VS Code and Cursor open the same box with "Reopen in Container
 2. GitHub → your brain repo → Settings → **Deploy keys** → **Add deploy key**. Paste `~/.config/brain/box_deploy_key.pub`, tick **Allow write access**, add it. GitHub accepts that key for this one repo only.
 3. The box reads the folder when it is created. If it is running, run `docker compose -p <repo-folder>_devcontainer down` (e.g. `ticket-bay_devcontainer`), then `./box`. The brain volume survives `down`.
 
-- The box mounts `~/.config/brain` read-only at `/home/node/.config/brain` (another folder: `BOX_BRAIN_CONFIG=/path ./box`). The key is used per command (`brain-start.sh`, the brain's `sync.sh`, through `GIT_SSH_COMMAND` and `BRAIN_SSH_KEY`), never in a git config.
+- The box mounts `~/.config/brain` read-only at `/home/node/.config/brain` (another folder: `BOX_BRAIN_CONFIG=/path ./box`). The key is used per command (`brain-start.sh`, the brain's `sync.mjs`, through `GIT_SSH_COMMAND` and `BRAIN_SSH_KEY`), never in a git config.
 - No `box.env` or no key: the box starts as before, without a brain, and its start log says so in one line. A clone or pull that fails never stops the box either.
 - `./box --docker` is a separate box with its own brain volume. Its Colima VM also shares `~/.config/brain`, read-only. A VM from before the brain shares only the repo, and `check-engine.sh` refuses it: stop it (`colima stop ticketbay-box`) and run `./box --docker` again.
 
@@ -73,7 +73,7 @@ brew install colima
 
 **What it does not do**
 - Anything inside the box can still leak: the repo, the box's copy of your brain, and any token you put in. Keep secrets out; use repo-scoped, short-lived tokens.
-- The brain's deploy key is readable in the box: anything in the box can read it, and read and write the brain repo with it (and nothing else). What the box pushes to the brain, every agent that pulls the brain reads next, including agents on your laptop. Read the brain's `git log -p` for changes to `skills/` and its scripts (`sync.sh`, `install.sh`) before you run them on your laptop.
+- The brain's deploy key is readable in the box: anything in the box can read it, and read and write the brain repo with it (and nothing else). What the box pushes to the brain, every agent that pulls the brain reads next, including agents on your laptop. Read the brain's `git log -p` for changes to `skills/` and its scripts (`sync.mjs`, `install.mjs`) before you run them on your laptop.
 - Allowed hosts are a way out too (for example GitHub, if you log `gh` in, or with any token the agent is given), and DNS lookups still leave the box. GitHub's ranges are allowed on every port, so SSH to GitHub works too (the brain's deploy key uses it).
 - The repo folder is shared with your machine, so the agent's edits land on your disk. Git is the undo button.
 - Plain `./box` has no Docker socket (it would give the box your machine), so Testcontainers cannot run there. The Postgres tests fall back to the box's own database instead: `./box npm run test:http` (or `test:integration`, or `npm test`) creates throwaway databases next to the app's on `db:5432` and drops them at the end. UI tests (Playwright) need Docker: use `./box --docker`, or the CI gate (.github/workflows/gate.yml), which runs them on every pull request and every push to main.
