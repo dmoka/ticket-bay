@@ -120,7 +120,7 @@ The Postgres lanes start a container with Testcontainers. Without Docker (inside
 
 **Test with real databases.** The integration lane never mocks the database. `tests/integration/global-setup.ts` starts one throwaway Postgres container per run and migrates a template database. Each test file clones its own database from that template, and every test starts from empty tables (`TRUNCATE`). The race tests open two real connections that commit and block on each other's row locks — which is why isolation is by truncation and not by a rolled-back transaction around each test.
 
-**Playwright for critical flows only.** `e2e/` holds three flows: booking with a discount code, a refund inside the window, and a refund refused once the event has started. Everything else is pinned faster one layer down.
+**Playwright for critical flows only.** `e2e/` holds the critical flows: booking and paying, booking with a discount code, a refund inside the window, a refund refused once the event has started, an admin cancelling an event, and the API keys page. Everything else is pinned faster one layer down.
 
 ## The testing team
 
