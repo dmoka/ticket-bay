@@ -7,7 +7,8 @@
   "service": "app",
   "runServices": ["app", "db"],
   // Refuses any engine but a Colima VM that shares only this repo (Docker Desktop shares your home).
-  "initializeCommand": "${localWorkspaceFolder}/.devcontainer/docker/check-engine.sh",
+  // Also creates the brain folder the box mounts (compose.yaml), if it is missing.
+  "initializeCommand": "mkdir -p \"${BOX_BRAIN:-$HOME/brain}\" && ${localWorkspaceFolder}/.devcontainer/docker/check-engine.sh",
   "customizations": {
     "vscode": {
       "extensions": ["anthropic.claude-code", "dbaeumer.vscode-eslint"]
@@ -30,6 +31,8 @@
   },
   "workspaceFolder": "/workspace",
   "postCreateCommand": "sudo chown node:node /workspace/node_modules",
-  "postStartCommand": "sudo /usr/local/bin/init-firewall.sh",
+  // Then connects the brain (if there is one) to Claude Code in the box: the brain's install.sh
+  // links its skills and adds the pointer line, in the box's own config volume.
+  "postStartCommand": "sudo /usr/local/bin/init-firewall.sh && if [ -f /home/node/brain/install.sh ]; then CLAUDE_DIR=/home/node/.claude bash /home/node/brain/install.sh; fi",
   "waitFor": "postStartCommand"
 }

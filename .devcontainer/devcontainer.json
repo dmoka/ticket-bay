@@ -6,6 +6,8 @@
   "dockerComposeFile": "compose.yaml",
   "service": "app",
   "runServices": ["app", "db"],
+  // The brain folder must exist on your machine before the box mounts it (compose.yaml).
+  "initializeCommand": "mkdir -p \"${BOX_BRAIN:-$HOME/brain}\"",
   "customizations": {
     "vscode": {
       "extensions": ["anthropic.claude-code", "dbaeumer.vscode-eslint"]
@@ -28,6 +30,8 @@
   },
   "workspaceFolder": "/workspace",
   "postCreateCommand": "sudo chown node:node /workspace/node_modules",
-  "postStartCommand": "sudo /usr/local/bin/init-firewall.sh",
+  // Then connects the brain (if there is one) to Claude Code in the box: the brain's install.sh
+  // links its skills and adds the pointer line, in the box's own config volume.
+  "postStartCommand": "sudo /usr/local/bin/init-firewall.sh && if [ -f /home/node/brain/install.sh ]; then CLAUDE_DIR=/home/node/.claude bash /home/node/brain/install.sh; fi",
   "waitFor": "postStartCommand"
 }
