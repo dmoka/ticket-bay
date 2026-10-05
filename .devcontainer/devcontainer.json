@@ -6,6 +6,8 @@
   "dockerComposeFile": "compose.yaml",
   "service": "app",
   "runServices": ["app", "db"],
+  // The brain settings folder the box mounts read-only (compose.yaml), so Docker never creates it as root.
+  "initializeCommand": "mkdir -p \"${BOX_BRAIN_CONFIG:-$HOME/.config/brain}\"",
   "customizations": {
     "vscode": {
       "extensions": ["anthropic.claude-code", "dbaeumer.vscode-eslint"]
@@ -16,7 +18,9 @@
   "mounts": [
     "source=ticketbay-bashhistory-${devcontainerId},target=/commandhistory,type=volume",
     "source=ticketbay-claude-config-${devcontainerId},target=/home/node/.claude,type=volume",
-    "source=ticketbay-node-modules-${devcontainerId},target=/workspace/node_modules,type=volume"
+    "source=ticketbay-node-modules-${devcontainerId},target=/workspace/node_modules,type=volume",
+    // The box's own copy of your second brain (module 5), cloned by brain-start.sh.
+    "source=ticketbay-brain-${devcontainerId},target=/home/node/brain,type=volume"
   ],
   "containerEnv": {
     "NODE_OPTIONS": "--max-old-space-size=4096",
@@ -28,6 +32,7 @@
   },
   "workspaceFolder": "/workspace",
   "postCreateCommand": "sudo chown node:node /workspace/node_modules",
-  "postStartCommand": "sudo /usr/local/bin/init-firewall.sh",
+  // Then clones or pulls your brain and connects it to Claude Code in the box (brain-start.sh).
+  "postStartCommand": "sudo /usr/local/bin/init-firewall.sh && bash /workspace/.devcontainer/brain-start.sh",
   "waitFor": "postStartCommand"
 }

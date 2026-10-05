@@ -17,7 +17,14 @@ services:
     cap_add: [NET_ADMIN, NET_RAW]
     volumes:
       - ..:/workspace:cached
+      # Your second brain's settings (module 5), read-only: box.env (BRAIN_REPO) and box_deploy_key,
+      # a deploy key that can write only the brain repo. Empty folder: the box has no brain.
+      - ${BOX_BRAIN_CONFIG:-~/.config/brain}:/home/node/.config/brain:ro
+    env_file:
+      - path: ${BOX_BRAIN_CONFIG:-~/.config/brain}/box.env
+        required: false
     environment:
+      BRAIN_SSH_KEY: /home/node/.config/brain/box_deploy_key
       DATABASE_URL: postgres://ticketbay:local-dev-only@db:5432/ticketbay
       BETTER_AUTH_URL: http://localhost:${BOX_PORT:-3000}
     ports:

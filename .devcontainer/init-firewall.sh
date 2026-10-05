@@ -2,7 +2,8 @@
 # Default-deny egress firewall for the TicketBay sandbox.
 # Based on Anthropic's reference init-firewall.sh:
 # https://github.com/anthropics/claude-code/blob/main/.devcontainer/init-firewall.sh (MIT)
-# Changes: DNS only to the container's own resolvers, no outbound SSH (git uses HTTPS),
+# Changes: DNS only to the container's own resolvers, no outbound SSH except to GitHub (its ranges
+# are allowed on every port; git in the box uses HTTPS),
 # Claude sign-in domains added, IPv6 egress dropped, npm registry verified, the box's Postgres allowed,
 # an --engine mode for the Docker engine VM of `./box --docker`.
 #   init-firewall.sh           the box itself (postStartCommand)
