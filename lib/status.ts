@@ -1,6 +1,9 @@
 import type { EventRow } from "@/src/db/schema";
 import { earlyBirdApplies } from "@/src/domain/invoice";
 
+/** An event shows "Few left" when this share of its seats or less is still unsold. */
+export const FEW_LEFT_RATIO = 0.1;
+
 export type EventStatus = "cancelled" | "on-sale" | "early-bird" | "few-left" | "sold-out" | "past";
 
 export function eventStatus(ev: EventRow, nowMs: number): EventStatus {
@@ -8,7 +11,7 @@ export function eventStatus(ev: EventRow, nowMs: number): EventStatus {
   if (nowMs >= ev.startsAtMs) return "past";
   const left = ev.totalSeats - ev.seatsSold;
   if (left <= 0) return "sold-out";
-  if (left / ev.totalSeats <= 0.1) return "few-left";
+  if (left / ev.totalSeats <= FEW_LEFT_RATIO) return "few-left";
   if (earlyBirdApplies({ startMs: ev.startsAtMs }, nowMs)) return "early-bird";
   return "on-sale";
 }
