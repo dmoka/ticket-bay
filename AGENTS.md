@@ -5,7 +5,7 @@ This repo runs a **multi-critic loop**: one coding agent writes code, five indep
 ## The loop
 
 1. The **coder** (the main agent session) writes or changes code.
-2. All five testers run as subagents, **in parallel**: `integration-tester`, `mutation-tester`, `property-tester`, `ui-tester`, `adversarial-tester` (in Claude Code: `.claude/agents/`; in other harnesses, hand each tester's brief to a fresh subagent).
+2. All five testers run as subagents, **in parallel**: `integration-tester`, `mutation-tester`, `property-tester`, `ui-tester` (in Claude Code: `.claude/agents/`; in other harnesses, hand each tester's brief to a fresh subagent), and the `adversarial-tester` skill from [dmoka/skills](https://github.com/dmoka/skills/tree/main/skills/adversarial-tester) (installed with the course skills; it runs its own fresh subagent and labels each finding PROVED or REASONED).
 3. All five green → done, ship it.
 4. Any failure → collect every finding into one report, hand it back to the coder, fix, go again.
 5. **Maximum 3 rounds.** Not converging by round 3 → stop and escalate to a human.

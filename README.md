@@ -134,7 +134,7 @@ This repo is also wired with a **team of five AI tester agents** for [Claude Cod
 | [`mutation-tester`](.claude/agents/mutation-tester.md) | Runs Stryker, explains every surviving mutant as the lie your suite is telling | One surviving mutant in money code outranks any score |
 | [`property-tester`](.claude/agents/property-tester.md) | Writes fast-check properties — thousands of generated inputs against your invariants | State the rule in English first, then encode it |
 | [`ui-tester`](.claude/agents/ui-tester.md) | Playwright flows on the money paths | Assert what the user sees, never that the page loaded |
-| [`adversarial-tester`](.claude/agents/adversarial-tester.md) | Reads the code hunting shortcuts, reads the tests hunting what they avoid, writes the tests that break green suites | It succeeds when green turns red |
+| [`adversarial-tester`](https://github.com/dmoka/skills/tree/main/skills/adversarial-tester) (a skill in dmoka/skills, not in `.claude/agents/`) | Reviews a change against its acceptance criteria and the repo rules, proves what it can with failing tests, reports the rest as reasoned findings, gives a merge verdict | Every finding says how it is known: PROVED or REASONED |
 
 The five run as **Claude Code subagents** in a multi-critic loop — one coder, five critics, max 3 rounds. Loop rules in [`AGENTS.md`](AGENTS.md).
 
@@ -156,7 +156,7 @@ That is the lesson worth taking: mutation testing grades the tests you have agai
 
 ## Steal it
 
-1. Copy `.claude/agents/` into any repo.
+1. Copy `.claude/agents/` into any repo, and install the `adversarial-tester` skill from [dmoka/skills](https://github.com/dmoka/skills).
 2. Copy the loop rules from `CLAUDE.md` into yours.
 3. The example attacks reference this repo's domain (money, refunds, ticket counts) on purpose — concrete examples make agents sharper than generic instructions. Swap them for your domain's equivalents: the attack *shapes* (boundaries, odd splits, degenerate inputs, the gap between code and tests) are what transfer.
 4. Ask Claude Code to run the testers after any change.
