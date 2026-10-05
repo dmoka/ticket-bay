@@ -23,11 +23,7 @@ RUN echo "export PROMPT_COMMAND='history -a' && export HISTFILE=/commandhistory/
 
 ENV DEVCONTAINER=true
 
-RUN mkdir -p /workspace /home/node/.claude && chown -R node:node /workspace /home/node/.claude
-
-# The brain (compose.yaml) is mounted from your machine and belongs to your user there, so git
-# would refuse it ("dubious ownership"). Trusted here, in the image, never in the brain's .git/config.
-RUN git config --system --add safe.directory /home/node/brain
+RUN mkdir -p /workspace /home/node/.claude /home/node/brain && chown -R node:node /workspace /home/node/.claude /home/node/brain
 WORKDIR /workspace
 
 ARG GIT_DELTA_VERSION=0.18.2

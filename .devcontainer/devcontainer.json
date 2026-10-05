@@ -6,8 +6,6 @@
   "dockerComposeFile": "compose.yaml",
   "service": "app",
   "runServices": ["app", "db"],
-  // The brain folder must exist on your machine before the box mounts it (compose.yaml).
-  "initializeCommand": "mkdir -p \"${BOX_BRAIN:-$HOME/brain}\"",
   "customizations": {
     "vscode": {
       "extensions": ["anthropic.claude-code", "dbaeumer.vscode-eslint"]
@@ -18,7 +16,9 @@
   "mounts": [
     "source=ticketbay-bashhistory-${devcontainerId},target=/commandhistory,type=volume",
     "source=ticketbay-claude-config-${devcontainerId},target=/home/node/.claude,type=volume",
-    "source=ticketbay-node-modules-${devcontainerId},target=/workspace/node_modules,type=volume"
+    "source=ticketbay-node-modules-${devcontainerId},target=/workspace/node_modules,type=volume",
+    // The box's own copy of your second brain (module 5), cloned by brain-start.sh.
+    "source=ticketbay-brain-${devcontainerId},target=/home/node/brain,type=volume"
   ],
   "containerEnv": {
     "NODE_OPTIONS": "--max-old-space-size=4096",
@@ -30,8 +30,7 @@
   },
   "workspaceFolder": "/workspace",
   "postCreateCommand": "sudo chown node:node /workspace/node_modules",
-  // Then connects the brain (if there is one) to Claude Code in the box: the brain's install.sh
-  // links its skills and adds the pointer line, in the box's own config volume.
-  "postStartCommand": "sudo /usr/local/bin/init-firewall.sh && if [ -f /home/node/brain/install.sh ]; then CLAUDE_DIR=/home/node/.claude bash /home/node/brain/install.sh; fi",
+  // Then clones or pulls your brain and connects it to Claude Code in the box (brain-start.sh).
+  "postStartCommand": "sudo /usr/local/bin/init-firewall.sh && bash /workspace/.devcontainer/brain-start.sh",
   "waitFor": "postStartCommand"
 }

@@ -17,12 +17,10 @@ services:
     cap_add: [NET_ADMIN, NET_RAW]
     volumes:
       - ..:/workspace:cached
-      # Your second brain (module 5), read and write. Missing? initializeCommand creates an empty one.
-      - ${BOX_BRAIN:-~/brain}:/home/node/brain
-    # BRAIN_GIT_TOKEN: the token the box pushes the brain with (it can write only the brain repo).
-    # The file lives outside the repo and the brain; without it the box commits the brain but does not push.
+    # Your second brain (module 5): BRAIN_REPO (its https URL) and BRAIN_GIT_TOKEN (a token that can
+    # read and write only that repo). The file lives outside this repo; without it the box has no brain.
     env_file:
-      - path: ~/.config/brain/box.env
+      - path: ${BOX_BRAIN_ENV:-~/.config/brain/box.env}
         required: false
     environment:
       DATABASE_URL: postgres://ticketbay:local-dev-only@db:5432/ticketbay
