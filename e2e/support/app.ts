@@ -44,11 +44,17 @@ export async function submitSignIn(page: Page, user: E2EUser) {
   await page.getByRole("button", { name: "Sign in" }).click();
 }
 
-/** Signs in through the real /sign-in page and waits until the browser is back on `next`. */
+/**
+ * Signs in through the real /sign-in page and waits until the browser is back
+ * on `next` and its link prefetches are done. The home page prefetches every
+ * event; a spec that navigates on at once aborts them mid-render, and the
+ * server logs each one as "The destination stream closed early."
+ */
 export async function signIn(page: Page, user: E2EUser, next = "/") {
   await page.goto(`/sign-in?next=${encodeURIComponent(next)}`);
   await submitSignIn(page, user);
   await page.waitForURL((u) => u.pathname + u.search === next);
+  await page.waitForLoadState("networkidle");
 }
 
 /**
