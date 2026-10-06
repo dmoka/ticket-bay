@@ -30,7 +30,7 @@ export function pct(n: number, digits = 0): string {
   return `${n.toFixed(digits)}%`;
 }
 
-const TZ = "Europe/Budapest";
+const TZ = "UTC";
 
 /** Tue 7 Oct 2026 */
 export function date(ms: number): string {
