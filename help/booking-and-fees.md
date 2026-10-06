@@ -2,7 +2,7 @@
 
 ## Service fee
 
-Every order has a **service fee of 3% of the ticket price after discounts, at least €1.00 and at most €20.00**. It is shown before you pay and it is not refundable.
+Every order has a **service fee of 3% of the ticket price after discounts, at least €2.00 and at most €20.00**. It is shown before you pay and it is not refundable.
 
 ## VAT
 

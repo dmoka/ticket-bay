@@ -245,7 +245,7 @@ export function createTicketBayServer(deps: ToolDeps, caller: Caller, opts: { in
         early_bird: eb
           ? { applies: true, percent_off: EARLY_BIRD_PERCENT, ends_at: localTime(earlyBirdEndsMs({ startMs: ev.startsAtMs })) }
           : { applies: false, note: `Early-bird (${EARLY_BIRD_PERCENT}% off) ends 30 days before the event.` },
-        service_fee: "3% of the ticket amount after discounts, at least €1.00 and at most €20.00, added at checkout, not refundable",
+        service_fee: "3% of the ticket amount after discounts, at least €2.00 and at most €20.00, added at checkout, not refundable",
         url: new URL(`/events/${ev.id}`, baseURL).toString(),
       });
     },

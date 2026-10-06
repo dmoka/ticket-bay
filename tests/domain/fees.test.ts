@@ -7,7 +7,7 @@ describe("serviceFee", () => {
     expect(serviceFee(10000)).toBe(300);
   });
   it("applies the minimum fee on small orders", () => {
-    expect(serviceFee(1000)).toBe(100);
+    expect(serviceFee(1000)).toBe(200);
   });
   it("caps the fee on huge orders", () => {
     expect(serviceFee(100000)).toBe(2000);

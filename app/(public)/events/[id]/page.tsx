@@ -101,7 +101,7 @@ export default async function EventPage({ params }: { params: Promise<{ id: stri
             </table>
           </div>
           <p className="mt-2 text-[12px] text-muted-foreground">
-            A service fee of 3% (min {money(100)}, max {money(2000)}) is added at checkout. Prices include 27% VAT.
+            A service fee of 3% (min {money(200)}, max {money(2000)}) is added at checkout. Prices include 27% VAT.
           </p>
         </div>
 

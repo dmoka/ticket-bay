@@ -63,8 +63,8 @@ describe("buildInvoice — group discounts", () => {
 describe("buildInvoice — service fee", () => {
   it("applies the minimum fee on cheap orders", () => {
     const inv = buildInvoice(ev(2000, 5), 1, NOW);
-    expect(inv.feeCents).toBe(100);
-    expect(inv.totalCents).toBe(2100);
+    expect(inv.feeCents).toBe(200);
+    expect(inv.totalCents).toBe(2200);
   });
 
   it("caps the fee on large orders", () => {

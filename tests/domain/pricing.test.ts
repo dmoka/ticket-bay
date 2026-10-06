@@ -40,8 +40,8 @@ describe("buildInvoice with a discount code", () => {
     expect(inv.discountPercent).toBe(100);
     expect(inv.ticketsCents).toBe(0);
     // the service fee floor still applies to a free order
-    expect(inv.feeCents).toBe(100);
-    expect(inv.totalCents).toBe(100);
+    expect(inv.feeCents).toBe(200);
+    expect(inv.totalCents).toBe(200);
   });
 
   it("keeps ticketsCents + feeCents equal to the total", () => {
@@ -59,7 +59,7 @@ describe("buildInvoice with a discount code", () => {
   it("accepts a 100% code: the tickets are free, the fee is not", () => {
     const inv = buildInvoice(ev(), 2, NOW, 100);
     expect(inv.ticketsCents).toBe(0);
-    expect(inv.totalCents).toBe(100);
+    expect(inv.totalCents).toBe(200);
   });
 
   it("names the problem when the quantity is not a positive integer", () => {

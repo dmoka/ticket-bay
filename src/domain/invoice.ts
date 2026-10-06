@@ -13,7 +13,7 @@ export interface Invoice {
   discountCents: number;
   /** what the tickets cost after discounts — the refundable part of the order */
   ticketsCents: number;
-  /** service fee on the discounted amount (min 100, capped 2000) */
+  /** service fee on the discounted amount (min 200, capped 2000) */
   feeCents: number;
   /** what the customer pays: discounted subtotal + fee */
   totalCents: number;
