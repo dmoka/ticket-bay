@@ -2,8 +2,8 @@
 
 Seven places where bugs come from here, most frequent first. Each names the rule and where it lives.
 
-## 1. Seat boundaries
-`eventStatus` in `lib/status.ts`: sold out when `left <= 0`, "Few left" when `left / totalSeats <= 0.1`, early-bird before that. An exactly-full event is the boundary that breaks (see the example). Seat checks at booking: `seatsAvailable` in `src/domain/booking.ts`.
+## 1. Boundaries (`<` vs `<=`)
+A rule with a threshold breaks at the exact value. The thresholds here: seat counts (`eventStatus` in `lib/status.ts`, `seatsAvailable` in `src/domain/booking.ts`), the early-bird day count (#5), the refund time gate (#2), the fee minimum and maximum (#3). Test the exact value and one step either side (see the example).
 
 ## 2. The refund time gate
 `calculateRefund` in `src/domain/refund.ts` returns 0 from the instant the event starts (`nowMs >= eventStartMs`). The same `>=` is mirrored in `src/services/orders.ts` (seats go back only while the window is open) and `cancelEvent` refuses events that already started. A bug here is usually one of the three disagreeing.
