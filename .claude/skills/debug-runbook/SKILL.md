@@ -16,7 +16,7 @@ What this codebase won't tell you by reading it once. Work the steps in order; e
 5. **Ask what changed.** `scripts/recent-changes.sh <path>` lists the recent commits touching that area.
 6. **Fix the smallest thing** that turns the test green, then `npm run test:unit`. Done when everything is green and the only changes are the fix and the new test.
 
-A finished case, start to end: [examples/sold-out-badge.md](examples/sold-out-badge.md).
+A finished case, start to end: [examples/early-bird-boundary.md](examples/early-bird-boundary.md).
 For the fix-and-PR process after the cause is known, the bug-triage skill takes over.
 
 ## Gotchas
@@ -25,7 +25,7 @@ For the fix-and-PR process after the cause is known, the bug-triage skill takes 
 - **Integration and UI tests need Docker.** `tests/integration` and `e2e/` start Postgres with Testcontainers. A box started with plain `./box` has no Docker: the Postgres tests use the box's own database there (`tests/integration/global-setup.ts`), and the UI tests fail with a Docker error. A box started with `./box --docker` runs both with Testcontainers. Reproduce at unit level first; the heavy tests also run in CI.
 - **Refunds are based on `ticketsCents`**, what the tickets cost after discounts — `toDomainOrder` (`src/db/orders-repo.ts`) maps it into `Order.totalCents`. The service fee is never part of a refund.
 - **Time is always passed in.** Domain functions take `nowMs`; the app reads `now()` from `lib/clock.ts`, and Playwright moves time with the `tb-test-now` cookie when `TICKETBAY_TEST_CLOCK=1`. Tests use fixed instants.
-- **The `loop-test` branch carries a planted demo bug** (the sold-out badge) for the course; `main` is clean. Fix bugs against the branch you were given.
+- **The `loop-test` branch is a practice branch for the bug loop.** Fix bugs against the branch you were given.
 - **Money is integer cents end to end** (bigint columns in `src/db/schema.ts`). A float or a euro amount in a test is a bug in the test.
 
-Last verified: 2026-09-29 with Claude Code 2.1.284 (5 of 5 automatic picks on a buried planted bug)
+Last verified: 2026-09-29 with Claude Code 2.1.284 (5 of 5 automatic picks on a bug report)
