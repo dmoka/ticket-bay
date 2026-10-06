@@ -1,5 +1,6 @@
 import { Event, groupDiscount } from "./booking";
 import { serviceFee, vatPortion } from "./fees";
+import { percentOfCents } from "./money";
 
 export interface Invoice {
   /** list price x quantity, before any discount */
@@ -54,7 +55,7 @@ export function buildInvoice(ev: Event, quantity: number, nowMs: number, codePer
   const groupPercent = groupDiscount(quantity);
   const earlyBirdPercent = earlyBirdApplies(ev, nowMs) ? EARLY_BIRD_PERCENT : 0;
   const discountPercent = Math.min(100, groupPercent + earlyBirdPercent + codePercent);
-  const discountCents = Math.round((subtotalCents * discountPercent) / 100);
+  const discountCents = percentOfCents(subtotalCents, discountPercent);
   const ticketsCents = subtotalCents - discountCents;
   const feeCents = serviceFee(ticketsCents);
   const totalCents = ticketsCents + feeCents;

@@ -1,3 +1,5 @@
+import { REFUND_FEE_MIN_CENTS, REFUND_FEE_RATE } from "./money";
+
 export interface Order {
   /** total actually paid, in cents */
   totalCents: number;
@@ -73,9 +75,9 @@ function exactShare(total: number, part: number, whole: number): number {
 export function refundFee(refundCents: number): number {
   // Finite check: NaN slips past every comparison below and would collect the minimum fee.
   if (!Number.isFinite(refundCents) || refundCents <= 0) return 0;
-  const fee = Math.round(refundCents * 0.02);
-  const floored = fee >= 50 ? fee : 50;
-  return floored > refundCents ? refundCents : floored;
+  const fee = Math.round(refundCents * REFUND_FEE_RATE);
+  // The minimum applies first, then the refund itself caps the fee.
+  return Math.min(Math.max(fee, REFUND_FEE_MIN_CENTS), refundCents);
 }
 
 /** Net amount returned to the customer. Never negative. */
