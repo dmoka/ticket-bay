@@ -31,22 +31,9 @@ Stryker refuse) reports **BLOCKED**, never green. Blocked is not a pass.
 - **Test behavior through the public API**: the route handlers and the `src/domain` / `src/services` functions the app calls. Never test private helpers, never assert on internal calls, never mock our own modules. A refactor that changes no behavior must not break a test; if it does, the test was testing the implementation.
 - **Never mark a mutant equivalent yourself.** When the CI mutation check finds a survivor, write a test that kills it. If you believe it cannot be killed (the change does not change behavior), stop and ask the human, with the reason. Only after a yes add `// Stryker disable next-line <Mutator>: equivalent — <why>`. In a loop with nobody watching, leave the PR red and put the question in your report.
 
-## Commands
-
-- `npm test` — run the test suite (unit + Postgres integration; needs Docker)
-- `npm run test:unit` — domain, payments and formatting tests only (no Docker)
-- `npm run test:mutation` — Stryker mutation testing on `src/domain` (report: `reports/mutation/mutation.html`)
-- `npm run test:mutation:integration` — mutation testing for `src/db` and `src/services`, which
-  only the integration lane covers. Needs Docker, runs at concurrency 1 on purpose.
-- `npm run test:integration` — integration tests (Testcontainers Postgres; requires Docker)
-- `npm run test:http` — the REST API (`app/api/v1`) through its route handlers: integration + HTTP property tests (Testcontainers Postgres; in the box, without Docker, the box's own Postgres)
-- `npm run test:ui` — Playwright flows (critical flows only: sign-up and the money paths; Testcontainers Postgres)
-
 ## Fixing a reported bug
 
 The bug-triage skill (github.com/dmoka/skills) reads this section.
 
-- **Where the code lives:** business rules in `src/domain` (money, refunds, booking, pricing), use cases in `src/services`, database access in `src/db`, small helpers in `lib/`, the UI in `app/`.
 - **Where a regression test goes:** a new file `tests/domain/regression-<short-slug>.test.ts` for code in `src/domain`, or `tests/lib/regression-<short-slug>.test.ts` for code in `lib/`. The unit test config already runs both folders; do not edit it.
-- **The fast test suite:** `npm ci`, then `npm run test:unit` (no Docker needed).
-- **Imports:** tests may import app code with the `@/` alias (it is set up for the unit tests).
+- **The fast test suite:** `npm run test:unit` is the one that runs without Docker; use it for the regression test.
