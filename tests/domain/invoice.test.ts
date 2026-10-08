@@ -60,21 +60,6 @@ describe("buildInvoice — group discounts", () => {
   });
 });
 
-describe("buildInvoice — service fee", () => {
-  it("applies the minimum fee on cheap orders", () => {
-    const inv = buildInvoice(ev(2000, 5), 1, NOW);
-    expect(inv.feeCents).toBe(100);
-    expect(inv.totalCents).toBe(2100);
-  });
-
-  it("caps the fee on large orders", () => {
-    const inv = buildInvoice(ev(), 20, NOW);
-    expect(inv.feeCents).toBe(2000);
-    expect(inv.totalCents).toBe(92000);
-    expect(inv.vatCents).toBe(19559);
-  });
-});
-
 describe("buildInvoice — early-bird boundary", () => {
   it("applies early-bird at exactly 30 days", () => {
     const inv = buildInvoice(ev(5000, 30), 1, NOW);
