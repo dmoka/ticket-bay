@@ -154,10 +154,12 @@ describe("GET /api/v1/organizer/invoices", () => {
     expect((await get("?month=", bearer(anna.key))).body.month).toBe("2027-01");
   });
 
-  it("pins current behaviour — suspected bug: a free order in the month is a 500", async () => {
+  it("a free order in the month is invoiced at 0", async () => {
     await venue(t.db, { id: "park", venue: "Budapest Park" });
     await order("park", { discountPercent: 100, discountCents: 10_000, ticketsCents: 0, feeCents: 100, totalCents: 100 });
     const anna = await customer(auth, "Anna");
-    expect(await get("?month=2027-01", bearer(anna.key))).toMatchObject({ status: 500, body: SERVER_ERROR });
+    const r = await get("?month=2027-01", bearer(anna.key));
+    expect(r.status, r.text).toBe(200);
+    expect(r.body.organizers[0].lines[0]).toMatchObject({ grossCents: 0, vatCents: 0, netCents: 0, discountPercent: 100 });
   });
 });

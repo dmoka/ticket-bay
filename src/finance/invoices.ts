@@ -72,9 +72,8 @@ function sendMail(deps: InvoiceExportDeps, to: string, subject: string, body: st
 
 // right-align an amount in a fixed-width column of the printable invoice
 function col(eur: number, width: number) {
-  const digits = Math.floor(Math.log10(eur)) + 1;
-  const pad = Math.max(width - digits - 3, 0);
-  return " ".repeat(pad) + eur.toFixed(2);
+  const s = eur.toFixed(2);
+  return " ".repeat(Math.max(width - s.length, 0)) + s;
 }
 
 function left(s: string, width: number) {

@@ -218,6 +218,24 @@ describe("the money on a line", () => {
     expect(r.organizers[0].lines[0]).toMatchObject({ grossCents: 23_750, vatCents: 5_049, netCents: 18_701, discountPercent: 5, tickets: 5 });
   });
 
+  it("a free order (100% discount) is invoiced at 0.00 net, 0.00 VAT and 0.00 gross", async () => {
+    await park();
+    const o = await order("park", { discountPercent: 100, discountCents: 10_000, ticketsCents: 0, totalCents: 100, feeCents: 100 });
+    const r = await exportMonth();
+    expect(r.organizers[0].lines[0]).toMatchObject({ netCents: 0, vatCents: 0, grossCents: 0, discountPercent: 100 });
+    expect(r.totals).toEqual({ invoices: 1, netCents: 0, vatCents: 0, grossCents: 0 });
+    expect(csv()).toContain(",1,100,0.00,0.00,0.00,27%\n");
+    expect(txt()).toContain("TB-202701-000001" + sp(4) + `TB-${pad5(o.id)}` + sp(2) + "A Fan" + sp(19) + "1" + sp(4) + "        0.00" + "        0.00" + "        0.00\n");
+  });
+
+  it("an order of 1 cent has a VAT of 0 cents and a net of 1 cent", async () => {
+    await park();
+    await order("park", { subtotalCents: 1, ticketsCents: 1, feeCents: 100, totalCents: 101 });
+    const r = await exportMonth();
+    expect(r.organizers[0].lines[0]).toMatchObject({ netCents: 1, vatCents: 0, grossCents: 1 });
+    expect(txt()).toContain("        0.01" + "        0.00" + "        0.01\n");
+  });
+
   it("discount_pct is recomputed from the cents, rounded to a whole percent", async () => {
     await park();
     await order("park", { subtotalCents: 10_000, discountPercent: 15, discountCents: 1_500, ticketsCents: 8_500 });
@@ -287,6 +305,34 @@ describe("who is the seller", () => {
     expect(csv()).toContain(",Park Live Events Kft.,12345678-2-42,");
   });
 
+  it("every known venue is invoiced under its organizer: name, e-mail and tax number", async () => {
+    const table: Record<string, { organizer: string; email: string; taxNo: string }> = {
+      "Budapest Park": { organizer: "Park Live Events Kft.", email: "finance@parklive.example", taxNo: "12345678-2-42" },
+      "Zamárdi Beach": { organizer: "Lakeside Festivals Kft.", email: "accounts@lakeside-fest.example", taxNo: "23456789-2-14" },
+      "Hungexpo Hall G": { organizer: "CraftConf Szervező Kft.", email: "billing@craftconf.example", taxNo: "34567890-2-41" },
+      "MVM Dome": { organizer: "Dome Arena Productions Zrt.", email: "settlements@domearena.example", taxNo: "45678901-2-43" },
+      "Kisüzem": { organizer: "Kisüzem Kulturális Egyesület", email: "hello@kisuzem.example", taxNo: "18765432-1-42" },
+      "A38 Ship": { organizer: "Danube Stage Kft.", email: "finance@danubestage.example", taxNo: "56789012-2-43" },
+      "Opus Jazz Club": { organizer: "Opus Music Kft.", email: "office@opusmusic.example", taxNo: "67890123-2-42" },
+    };
+    for (const [i, v] of Object.keys(table).entries()) {
+      await venue(t.db, { id: `v${i}`, venue: v });
+      await order(`v${i}`);
+    }
+    const r = await exportMonth();
+    const seen = Object.fromEntries(
+      r.organizers.map((g: { organizer: string; email: string; taxNo: string; lines: { eventId: string }[] }) => [g.lines[0]!.eventId, { organizer: g.organizer, email: g.email, taxNo: g.taxNo }]),
+    );
+    expect(seen).toEqual(Object.fromEntries(Object.keys(table).map((v, i) => [`v${i}`, table[v]])));
+  });
+
+  it("pins current behaviour — suspected bug: Dumaszínház is an organizer in the payout report (payouts.ts) but not here, so its invoices go out under the venue name to the TicketBay address", async () => {
+    await venue(t.db, { id: "duma", venue: "Dumaszínház" });
+    await order("duma");
+    const r = await exportMonth();
+    expect(r.organizers[0]).toMatchObject({ organizer: "Dumaszínház", email: "invoices@ticketbay.example", taxNo: "" });
+  });
+
   it("an unknown venue is invoiced under its own name, without a tax number, to the TicketBay invoices address", async () => {
     await arena();
     await order("arena");
@@ -341,9 +387,35 @@ describe("the printable copy", () => {
     await exportMonth();
     expect(txt()).toContain("  Dr. Nagy-Kovács Erzsébe…1    ");
   });
+
+  it("prints a customer name of exactly 24 characters whole, and cuts one of 25", async () => {
+    await park();
+    await order("park", { customerName: "Nagy-Kovács Erzsébet Már" });
+    await order("park", { customerName: "Nagy-Kovács Erzsébet Mári" });
+    await exportMonth();
+    expect(txt()).toContain("  Nagy-Kovács Erzsébet Már1    ");
+    expect(txt()).toContain("  Nagy-Kovács Erzsébet Má…1    ");
+  });
+
+  it("amounts under one euro and zero amounts are right-aligned like the others", async () => {
+    await park();
+    const o = await order("park", { subtotalCents: 50, ticketsCents: 50, feeCents: 100, totalCents: 150 });
+    await exportMonth();
+    expect(txt()).toContain("TB-202701-000001" + sp(4) + `TB-${pad5(o.id)}` + sp(2) + "A Fan" + sp(19) + "1" + sp(4) + "        0.39" + "        0.11" + "        0.50\n");
+  });
 });
 
 describe("the files and the mails", () => {
+  it("creates the folder, nested too, when it does not exist yet", async () => {
+    await park();
+    await order("park");
+    const nested = path.join(dir, "finance", "2027");
+    await exportMonth(undefined, { dir: nested });
+    expect(fs.existsSync(path.join(nested, "invoices-2027-01.csv"))).toBe(true);
+    expect(fs.existsSync(path.join(nested, "invoices-2027-01.txt"))).toBe(true);
+    expect(fs.existsSync(path.join(nested, "outbox.log"))).toBe(true);
+  });
+
   it("writes invoices-YYYY-MM.csv and .txt into the folder and lists them relative to the working directory", async () => {
     await park();
     await order("park");
@@ -404,16 +476,12 @@ describe("pins current behaviour — suspected bugs", () => {
     }
   });
 
-  it("suspected bug: a free order (0 cents of tickets) throws RangeError (Invalid count value) while printing the copy", async () => {
+  it("suspected bug: an order with a 0 subtotal (a free event) gets discount_pct NaN", async () => {
     await park();
-    await order("park", { discountPercent: 100, discountCents: 10_000, ticketsCents: 0, totalCents: 100, feeCents: 100 });
-    await expect(exportMonth()).rejects.toThrow(RangeError);
-  });
-
-  it("suspected bug: an order of 1 or 2 cents (its VAT rounds to 0) throws RangeError while printing the copy — found by the invariant property", async () => {
-    await park();
-    await order("park", { subtotalCents: 1, ticketsCents: 1, feeCents: 100, totalCents: 101 });
-    await expect(exportMonth()).rejects.toThrow(RangeError);
+    await order("park", { subtotalCents: 0, discountCents: 0, ticketsCents: 0, totalCents: 100, feeCents: 100 });
+    const r = await exportMonth();
+    expect(Number.isNaN(r.organizers[0].lines[0].discountPercent)).toBe(true);
+    expect(csv()).toContain(",1,NaN,0.00,0.00,0.00,27%\n");
   });
 
   it("suspected bug: month 2027-13 exports January 2028 under the name 2027-13", async () => {
@@ -425,12 +493,6 @@ describe("pins current behaviour — suspected bugs", () => {
     expect(file("invoices-2028-01.txt")).toMatch(/^TICKETBAY - ORGANIZER INVOICES 2027-13\n/);
   });
 
-  it("suspected bug: an amount under one euro is one column too wide in the printable copy", async () => {
-    await park();
-    const o = await order("park", { subtotalCents: 50, ticketsCents: 50, feeCents: 100, totalCents: 150 });
-    await exportMonth();
-    expect(txt()).toContain("TB-202701-000001" + sp(4) + `TB-${pad5(o.id)}` + sp(2) + "A Fan" + sp(19) + "1" + sp(4) + "         0.39" + "         0.11" + "         0.50\n");
-  });
 
   // The pin needs another time zone at run time. Node honours a TZ change in
   // the main thread, not in a worker thread (process.env is a copy there), so
