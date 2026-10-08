@@ -63,6 +63,8 @@ export const orders = pgTable(
      * server has one; null only on rows from before accounts existed.
      */
     userId: text("user_id").references(() => user.id),
+    /** The account the tickets were transferred to; null while the booker still holds them. */
+    holderId: text("holder_id").references(() => user.id),
     customerEmail: text("customer_email").notNull(),
     customerName: text("customer_name").notNull(),
     quantity: integer("quantity").notNull(),
@@ -97,6 +99,7 @@ export const orders = pgTable(
     index("orders_event_idx").on(t.eventId),
     index("orders_email_idx").on(t.customerEmail),
     index("orders_user_idx").on(t.userId),
+    index("orders_holder_idx").on(t.holderId),
     index("orders_created_idx").on(t.createdAtMs),
     check("orders_quantity_positive", sql`${t.quantity} > 0`),
     check("orders_money_non_negative", sql`${t.ticketsCents} >= 0 AND ${t.totalCents} >= 0`),

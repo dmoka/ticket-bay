@@ -1,4 +1,4 @@
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, isNull, or } from "drizzle-orm";
 import type { Order } from "../domain/refund";
 import type { DbLike } from "./client";
 import { events, orders, type EventRow, type OrderRow } from "./schema";
@@ -42,14 +42,29 @@ export async function listOrdersByEmail(db: DbLike, email: string): Promise<{ or
   return rows.map((r) => ({ order: r.orders, event: r.events }));
 }
 
+/** The account that holds an order's tickets now: whoever they were transferred to, else the booker. */
+export function holderOf(order: Pick<OrderRow, "userId" | "holderId">): string | null {
+  return order.holderId ?? order.userId;
+}
+
+/** The orders whose tickets this account holds — booked by it and kept, or transferred to it. */
 export async function listOrdersByUser(db: DbLike, userId: string): Promise<{ order: OrderRow; event: EventRow }[]> {
   const rows = await db
     .select()
     .from(orders)
     .innerJoin(events, eq(orders.eventId, events.id))
-    .where(eq(orders.userId, userId))
+    .where(or(eq(orders.holderId, userId), and(isNull(orders.holderId), eq(orders.userId, userId))))
     .orderBy(desc(orders.createdAtMs));
   return rows.map((r) => ({ order: r.orders, event: r.events }));
+}
+
+/** Give a paid order's tickets to another account. False if the order is not paid (any more). */
+export async function setHolder(db: DbLike, id: number, holderId: string): Promise<boolean> {
+  const res = await db
+    .update(orders)
+    .set({ holderId })
+    .where(and(eq(orders.id, id), eq(orders.status, "paid")));
+  return res.rowCount === 1;
 }
 
 /** Every still-paid order of an event, row-locked until the transaction ends. */
