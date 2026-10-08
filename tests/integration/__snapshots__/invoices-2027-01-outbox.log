@@ -1,0 +1,57 @@
+To: invoices@ticketbay.example
+Subject: TicketBay invoices 2027-01 (INV-2027-01-2)
+Date: Fri, 15 Jan 2027 08:00:00 GMT
+
+Dear Arena,
+
+attached are the ticket invoices TicketBay issued in your name for 2027-01.
+
+  invoices:  1
+  net:              78.74 EUR
+  VAT 27%:          21.26 EUR
+  gross:           100.00 EUR
+
+First invoice: TB-202701-000001, last invoice: TB-202701-000001
+
+Thanks,
+TicketBay Finance
+
+-----
+To: finance@parklive.example
+Subject: TicketBay invoices 2027-01 (INV-2027-01-2)
+Date: Fri, 15 Jan 2027 08:00:00 GMT
+
+Dear Park Live Events Kft.,
+
+attached are the ticket invoices TicketBay issued in your name for 2027-01.
+
+  invoices:  2
+  net:             175.94 EUR
+  VAT 27%:          47.51 EUR
+  gross:           223.45 EUR
+
+First invoice: TB-202701-000002, last invoice: TB-202701-000003
+
+Thanks,
+TicketBay Finance
+
+-----
+To: accounts@lakeside-fest.example
+Subject: TicketBay invoices 2027-01 (INV-2027-01-2)
+Date: Fri, 15 Jan 2027 08:00:00 GMT
+
+Dear Lakeside Festivals Kft.,
+
+attached are the ticket invoices TicketBay issued in your name for 2027-01.
+
+  invoices:  1
+  net:             187.01 EUR
+  VAT 27%:          50.49 EUR
+  gross:           237.50 EUR
+
+First invoice: TB-202701-000004, last invoice: TB-202701-000004
+
+Thanks,
+TicketBay Finance
+
+-----

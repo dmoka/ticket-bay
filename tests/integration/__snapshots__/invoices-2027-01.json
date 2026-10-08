@@ -1,0 +1,108 @@
+{
+  "batchId": "INV-2027-01-2",
+  "month": "2027-01",
+  "generatedAt": "2027-01-15T08:00:00.000Z",
+  "organizers": [
+    {
+      "organizer": "Arena",
+      "email": "invoices@ticketbay.example",
+      "taxNo": "",
+      "lines": [
+        {
+          "invoiceNo": "TB-202701-000001",
+          "orderId": 2,
+          "orderNumber": "TB-00002",
+          "date": "2027-01-01",
+          "customer": "Kovács, \"Jr.\" Ádám",
+          "customerEmail": "fan2@example.com",
+          "eventId": "arena",
+          "eventName": "RockFest 2026",
+          "tickets": 1,
+          "discountPercent": 0,
+          "netCents": 7874,
+          "vatCents": 2126,
+          "grossCents": 10000
+        }
+      ],
+      "netCents": 7874,
+      "vatCents": 2126,
+      "grossCents": 10000
+    },
+    {
+      "organizer": "Park Live Events Kft.",
+      "email": "finance@parklive.example",
+      "taxNo": "12345678-2-42",
+      "lines": [
+        {
+          "invoiceNo": "TB-202701-000002",
+          "orderId": 1,
+          "orderNumber": "TB-00001",
+          "date": "2027-01-15",
+          "customer": "Kiss Anna",
+          "customerEmail": "fan1@example.com",
+          "eventId": "park",
+          "eventName": "Park Night",
+          "tickets": 2,
+          "discountPercent": 0,
+          "netCents": 9720,
+          "vatCents": 2625,
+          "grossCents": 12345
+        },
+        {
+          "invoiceNo": "TB-202701-000003",
+          "orderId": 4,
+          "orderNumber": "TB-00004",
+          "date": "2027-01-31",
+          "customer": "Tóth Béla",
+          "customerEmail": "fan4@example.com",
+          "eventId": "park",
+          "eventName": "Park Night",
+          "tickets": 1,
+          "discountPercent": 0,
+          "netCents": 7874,
+          "vatCents": 2126,
+          "grossCents": 10000
+        }
+      ],
+      "netCents": 17594,
+      "vatCents": 4751,
+      "grossCents": 22345
+    },
+    {
+      "organizer": "Lakeside Festivals Kft.",
+      "email": "accounts@lakeside-fest.example",
+      "taxNo": "23456789-2-14",
+      "lines": [
+        {
+          "invoiceNo": "TB-202701-000004",
+          "orderId": 3,
+          "orderNumber": "TB-00003",
+          "date": "2027-01-15",
+          "customer": "Dr. Nagy-Kovács Erzsébet Mária",
+          "customerEmail": "fan3@example.com",
+          "eventId": "beach",
+          "eventName": "Beach Fest, day 2",
+          "tickets": 5,
+          "discountPercent": 5,
+          "netCents": 18701,
+          "vatCents": 5049,
+          "grossCents": 23750
+        }
+      ],
+      "netCents": 18701,
+      "vatCents": 5049,
+      "grossCents": 23750
+    }
+  ],
+  "totals": {
+    "invoices": 4,
+    "netCents": 44169,
+    "vatCents": 11926,
+    "grossCents": 56095
+  },
+  "files": [
+    "invoices-2027-01.csv",
+    "invoices-2027-01.txt"
+  ],
+  "emailsSent": 3
+}
