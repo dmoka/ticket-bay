@@ -341,6 +341,21 @@ describe("who is the seller", () => {
     expect(txt()).toContain("Seller: Arena\n");
     expect(csv()).toContain(",Arena,,");
   });
+
+  it("a venue named like an Object.prototype member (toString, constructor, __proto__) is an unknown venue like any other", async () => {
+    for (const [i, name] of ["toString", "constructor", "__proto__", "hasOwnProperty"].entries()) {
+      await venue(t.db, { id: `proto-${i}`, venue: name });
+      await order(`proto-${i}`);
+    }
+    const r = await exportMonth();
+    expect(r.organizers.map((g: { organizer: string; email: string; taxNo: string; lines: unknown[] }) => [g.organizer, g.email, g.taxNo, g.lines.length]).sort()).toEqual([
+      ["__proto__", "invoices@ticketbay.example", "", 1],
+      ["constructor", "invoices@ticketbay.example", "", 1],
+      ["hasOwnProperty", "invoices@ticketbay.example", "", 1],
+      ["toString", "invoices@ticketbay.example", "", 1],
+    ]);
+    expect(r.emailsSent).toBe(4);
+  });
 });
 
 describe("the CSV for the accountants", () => {
@@ -474,20 +489,6 @@ describe("pins current behaviour — suspected bugs", () => {
     for (const month of ["banana", "2027", "2027-", "-1-1"]) {
       await expect(exportMonth({ month }), month).rejects.toThrow(RangeError);
     }
-  });
-
-  it("suspected bug: a venue named toString (any Object.prototype member) crashes the export — the organizer groups are a plain object", async () => {
-    await venue(t.db, { id: "proto", venue: "toString" });
-    await order("proto");
-    await expect(exportMonth()).rejects.toThrow(TypeError);
-  });
-
-  it("suspected bug: a venue named constructor is invoiced under 'Object' with no address — the organizer table is a plain object", async () => {
-    await venue(t.db, { id: "proto", venue: "constructor" });
-    await order("proto");
-    const r = await exportMonth();
-    expect(r.organizers[0]).toMatchObject({ organizer: "Object", email: undefined, taxNo: undefined });
-    expect(outbox()).toMatch(/^To: undefined\n/);
   });
 
   it("suspected bug: an order with a 0 subtotal (a free event) gets discount_pct NaN", async () => {

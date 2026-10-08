@@ -51,7 +51,7 @@ function withDefaults(partial: Partial<InvoiceExportDeps>): InvoiceExportDeps {
 }
 
 function organizerFor(venue: string) {
-  const o = ORGANIZERS[venue];
+  const o = Object.hasOwn(ORGANIZERS, venue) ? ORGANIZERS[venue] : undefined;
   if (o) return o;
   return { name: venue, email: "invoices@ticketbay.example", taxNo: "" };
 }
@@ -119,7 +119,7 @@ export async function invoiceExport(params: any, partial: Partial<InvoiceExportD
   // batch id: the month plus the first order in it (0 when there is none), so finance can tell exports apart
   const batchId = "INV-" + start.toISOString().substring(0, 7) + "-" + (rows.length > 0 ? rows[0].id : 0);
 
-  const groups: any = {};
+  const groups: any = Object.create(null); // keyed by organizer name, whatever it is
   const order: string[] = [];
   let totalNet = 0;
   let totalVat = 0;

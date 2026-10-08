@@ -69,7 +69,7 @@ const text = fc
 const MAPPED_VENUES = ["Budapest Park", "Zamárdi Beach", "Hungexpo Hall G", "MVM Dome", "Kisüzem", "A38 Ship", "Opus Jazz Club"];
 const venueName = fc.oneof(
   { weight: 3, arbitrary: fc.constantFrom(...MAPPED_VENUES) },
-  fc.constantFrom("Arena", "Dumaszínház", "Foo, Bar", 'Q "Quoted" Hall', "Zamárdi Beach "),
+  fc.constantFrom("Arena", "Dumaszínház", "Foo, Bar", 'Q "Quoted" Hall', "Zamárdi Beach ", "toString", "constructor", "__proto__"),
   text.filter((s) => s.length > 0),
 );
 
