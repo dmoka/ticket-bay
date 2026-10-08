@@ -10,6 +10,7 @@ import { customer, makeAuth, revokeKey, scopedKey, useCleanAccounts } from "../i
 import { useTestDatabase } from "../integration/database";
 import { NOW, venue } from "../integration/fixtures";
 import { bearer, call, loadRoutes, quietRefusedKeyLogs } from "./client";
+import { tidyReportsFolder } from "./reports-folder";
 
 const wiring = vi.hoisted(() => ({ auth: undefined as unknown, db: undefined as unknown, payments: undefined as unknown }));
 vi.mock("@/lib/auth", () => ({ appBaseURL: () => "http://localhost:3000", getAuth: () => wiring.auth }));
@@ -22,6 +23,7 @@ vi.mock("@/src/payments", async () => ({ ...(await import("../../src/payments"))
 const t = useTestDatabase();
 useCleanAccounts(t);
 quietRefusedKeyLogs();
+tidyReportsFolder();
 
 let auth: Auth;
 

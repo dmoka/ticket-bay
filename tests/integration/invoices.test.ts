@@ -474,6 +474,16 @@ describe("the files and the mails", () => {
     expect(outbox().match(/^To: .*$/gm)).toEqual(["To: invoices@ticketbay.example", "To: finance@parklive.example"]);
   });
 
+  it("completes when the outbox cannot be written; pins current behaviour — suspected bug: the mail that was not written counts as sent", async () => {
+    await park();
+    await order("park");
+    fs.mkdirSync(path.join(dir, "outbox.log")); // a folder where the log file should be: every append fails
+    const r = await exportMonth();
+    expect(r.totals.invoices).toBe(1);
+    expect(r.emailsSent).toBe(1);
+    expect(fs.statSync(path.join(dir, "outbox.log")).isDirectory()).toBe(true);
+  });
+
   it("keeps the last export in lastInvoiceExport", async () => {
     await park();
     await order("park");
