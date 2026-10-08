@@ -23,6 +23,7 @@ export const events = pgTable(
     venue: text("venue").notNull(),
     city: text("city").notNull(),
     description: text("description").notNull().default(""),
+    notes: text("notes"),
     startsAtMs: instant("starts_at_ms").notNull(),
     totalSeats: integer("total_seats").notNull(),
     seatsSold: integer("seats_sold").notNull().default(0),
