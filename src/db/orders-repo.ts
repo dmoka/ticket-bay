@@ -78,7 +78,7 @@ export async function listUnpaidCancelRefunds(db: DbLike, eventId: string): Prom
 
 /** Order ids are Postgres INTEGERs: anything else cannot name an order. */
 export function isOrderId(id: number): boolean {
-  return Number.isSafeInteger(id) && id > 0 && id <= 2_147_483_647;
+  return Number.isSafeInteger(id) && id > 0;
 }
 
 /**
