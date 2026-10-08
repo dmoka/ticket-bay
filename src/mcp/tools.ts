@@ -18,7 +18,7 @@ import { previewCancellation } from "../domain/cancellation";
 import { buildInvoice, EARLY_BIRD_PERCENT, earlyBirdApplies, earlyBirdEndsMs } from "../domain/invoice";
 import { priceTiers } from "../domain/pricing";
 import type { PaymentProvider } from "../payments";
-import { cancelOwnOrder, OrderError, placeOrder, quoteOrder } from "../services/orders";
+import { cancelOwnOrder, checkCode, OrderError, placeOrder, quoteOrder } from "../services/orders";
 import { loadHelpDocs, searchDocs } from "./docs";
 
 /** Who is calling. null = anonymous: public tools only. */
@@ -39,7 +39,7 @@ export interface ToolDeps {
   baseURL: string;
 }
 
-export const PUBLIC_TOOLS = ["list_events", "get_event", "quote_price", "search_docs"] as const;
+export const PUBLIC_TOOLS = ["list_events", "get_event", "quote_price", "check_discount_code", "search_docs"] as const;
 export const PRIVATE_TOOLS = ["book_tickets", "my_orders", "refund_order", "cancel_event"] as const;
 
 /** The key scope each private tool needs. A read-only key gets tickets:read only. */
@@ -53,7 +53,7 @@ const SCOPE: Record<(typeof PRIVATE_TOOLS)[number], string> = {
 export const UNAUTHENTICATED_MESSAGE =
   "Unauthorized (401): this tool acts on a customer's account, so it needs one. " +
   "Create an API key in TicketBay under Settings → Developers and send it as `Authorization: Bearer tb_…`, " +
-  "Browsing tools (list_events, get_event, quote_price, search_docs) work without a key.";
+  "Browsing tools (list_events, get_event, quote_price, check_discount_code, search_docs) work without a key.";
 
 const TZ = "Europe/Budapest";
 const ymd = new Intl.DateTimeFormat("en-CA", { year: "numeric", month: "2-digit", day: "2-digit", timeZone: TZ });
@@ -172,7 +172,7 @@ export function createTicketBayServer(deps: ToolDeps, caller: Caller, opts: { in
     {
       instructions:
         "TicketBay sells tickets for concerts, festivals, conferences and comedy nights in Hungary. Prices are in EUR, VAT included. " +
-        "Browse with list_events → get_event → quote_price. " +
+        "Browse with list_events → get_event → quote_price; check_discount_code tells whether a code works before quoting with it. " +
         (opts.includePrivate
           ? "book_tickets charges the customer's card; always quote first and get the customer's explicit yes. " +
             "refund_order cannot be undone; say the refund amount from my_orders before calling it."
@@ -285,6 +285,28 @@ export function createTicketBayServer(deps: ToolDeps, caller: Caller, opts: { in
           vat_included_eur: eur(inv.vatCents),
         });
       }),
+  );
+
+  server.registerTool(
+    "check_discount_code",
+    {
+      title: "Check a discount code",
+      description:
+        "Whether a discount code can be used right now and how much it takes off — the same check checkout runs. " +
+        "A code that does not work is a normal answer (valid: false with the reason: unknown, expired, used up or switched off), not an error. " +
+        "The percent comes off the ticket subtotal and adds to any group or early-bird discount (total capped at 100%); " +
+        "use quote_price with the code for the exact amount on a given order. Books nothing and uses up nothing.",
+      inputSchema: z.object({ code: z.string().trim().min(1).max(100).describe("The code as the customer typed it, e.g. WELCOME10. Case-insensitive.") }),
+      annotations: { readOnlyHint: true, openWorldHint: false },
+    },
+    async ({ code }) => {
+      const check = await checkCode({ db, nowMs: now() }, code);
+      return json(
+        check.ok
+          ? { code: check.code, valid: true, percent_off: check.percent, applies_to: "the ticket subtotal, on top of any group or early-bird discount" }
+          : { code: check.code, valid: false, reason: check.reason },
+      );
+    },
   );
 
   server.registerTool(
