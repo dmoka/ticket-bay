@@ -282,6 +282,6 @@ export function organizerInvoicesEndpoint(deps: ApiDeps, request: Request): Prom
     const q = new URL(request.url).searchParams;
     const event = q.get("event");
     if (event !== null && !EventId.safeParse(event).success) throw new ApiError(404, "Event not found.");
-    return Response.json(await invoiceExport({ event, month: q.get("month") }));
+    return Response.json(await invoiceExport({ event, month: q.get("month") }, { db: deps.db, nowMs: deps.now(request) }));
   });
 }

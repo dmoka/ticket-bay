@@ -9,7 +9,7 @@
 // Copied from the payout report and adjusted, keep the two in sync.
 import fs from "fs";
 import path from "path";
-import { getDb } from "../db/client";
+import { getDb, type Db } from "../db/client";
 
 const VAT_RATE = 0.27;
 
@@ -28,6 +28,28 @@ const ORGANIZERS: any = {
 let invoiceSeq = 1;
 export let lastInvoiceExport: any = null;
 
+/** What the export runs on; every field defaults to the app's own (the shared pool, the wall clock, ./reports, the running number). */
+export interface InvoiceExportDeps {
+  db: Db;
+  /** "now": the default month, the generated-at stamps and the mail dates */
+  nowMs: number;
+  /** the folder the CSV, the printable copy and the outbox log go to */
+  dir: string;
+  /** the running invoice number */
+  sequence: { next(): number };
+}
+
+const moduleSequence = { next: () => invoiceSeq++ };
+
+function withDefaults(partial: Partial<InvoiceExportDeps>): InvoiceExportDeps {
+  return {
+    db: partial.db ?? getDb(),
+    nowMs: partial.nowMs ?? Date.now(),
+    dir: partial.dir ?? path.join(process.cwd(), "reports"),
+    sequence: partial.sequence ?? moduleSequence,
+  };
+}
+
 function organizerFor(venue: string) {
   const o = ORGANIZERS[venue];
   if (o) return o;
@@ -35,13 +57,13 @@ function organizerFor(venue: string) {
 }
 
 // same fake transport as the payout report, the accountants read the outbox file
-function sendMail(to: string, subject: string, body: string) {
+function sendMail(deps: InvoiceExportDeps, to: string, subject: string, body: string) {
   console.log("[invoices] mail -> " + to + " (" + subject + ")");
   try {
-    fs.mkdirSync(path.join(process.cwd(), "reports"), { recursive: true });
+    fs.mkdirSync(deps.dir, { recursive: true });
     fs.appendFileSync(
-      path.join(process.cwd(), "reports", "outbox.log"),
-      "To: " + to + "\nSubject: " + subject + "\nDate: " + new Date().toUTCString() + "\n\n" + body + "\n-----\n",
+      path.join(deps.dir, "outbox.log"),
+      "To: " + to + "\nSubject: " + subject + "\nDate: " + new Date(deps.nowMs).toUTCString() + "\n\n" + body + "\n-----\n",
     );
   } catch (e) {
     console.log("[invoices] could not write outbox", e);
@@ -66,12 +88,13 @@ function q(s: any) {
   return s;
 }
 
-export async function invoiceExport(params: any) {
-  const db = getDb();
+export async function invoiceExport(params: any, partial: Partial<InvoiceExportDeps> = {}) {
+  const deps = withDefaults(partial);
+  const db = deps.db;
 
   let month = params.month;
   if (!month) {
-    const d = new Date();
+    const d = new Date(deps.nowMs);
     month = d.getFullYear() + "-" + (d.getMonth() + 1);
   }
   const parts = month.split("-");
@@ -119,7 +142,7 @@ export async function invoiceExport(params: any) {
     const netCents = grossCents - vatCents;
     const discountPct = Math.round((Number(o.discount_cents) / Number(o.subtotal_cents)) * 100);
 
-    const invoiceNo = "TB-" + start.toISOString().substring(0, 7).replace("-", "") + "-" + String(invoiceSeq++).padStart(6, "0");
+    const invoiceNo = "TB-" + start.toISOString().substring(0, 7).replace("-", "") + "-" + String(deps.sequence.next()).padStart(6, "0");
     g.lines.push({
       invoiceNo: invoiceNo,
       orderId: o.id,
@@ -157,7 +180,7 @@ export async function invoiceExport(params: any) {
   }
 
   // printable copy, one block per organizer
-  let txt = "TICKETBAY - ORGANIZER INVOICES " + month + "\nBatch " + batchId + "   generated " + new Date().toISOString() + "\n\n";
+  let txt = "TICKETBAY - ORGANIZER INVOICES " + month + "\nBatch " + batchId + "   generated " + new Date(deps.nowMs).toISOString() + "\n\n";
   for (let i = 0; i < order.length; i++) {
     const g = groups[order[i]];
     txt += "=".repeat(96) + "\n";
@@ -175,8 +198,8 @@ export async function invoiceExport(params: any) {
     txt += "VAT 27% included in the gross amounts.\n\n";
   }
 
-  const dir = path.join(process.cwd(), "reports");
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir);
+  const dir = deps.dir;
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
   const csvFile = path.join(dir, "invoices-" + start.toISOString().substring(0, 7) + ".csv");
   const txtFile = path.join(dir, "invoices-" + start.toISOString().substring(0, 7) + ".txt");
   fs.writeFileSync(csvFile, csv);
@@ -194,14 +217,14 @@ export async function invoiceExport(params: any) {
     body += "  gross:     " + col(g.grossCents / 100, 12) + " EUR\n\n";
     body += "First invoice: " + g.lines[0].invoiceNo + ", last invoice: " + g.lines[g.lines.length - 1].invoiceNo + "\n";
     body += "\nThanks,\nTicketBay Finance\n";
-    sendMail(g.email, "TicketBay invoices " + month + " (" + batchId + ")", body);
+    sendMail(deps, g.email, "TicketBay invoices " + month + " (" + batchId + ")", body);
     mails++;
   }
 
   const result = {
     batchId: batchId,
     month: start.toISOString().substring(0, 7),
-    generatedAt: new Date().toISOString(),
+    generatedAt: new Date(deps.nowMs).toISOString(),
     organizers: order.map((name) => groups[name]),
     totals: { invoices: rows.length, netCents: totalNet, vatCents: totalVat, grossCents: totalGross },
     files: [path.relative(process.cwd(), csvFile), path.relative(process.cwd(), txtFile)],
