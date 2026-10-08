@@ -136,7 +136,7 @@ This repo is also wired with a **team of five AI tester agents** for [Claude Cod
 | [`ui-tester`](.claude/agents/ui-tester.md) | Playwright flows on the money paths | Assert what the user sees, never that the page loaded |
 | [`adversarial-tester`](https://github.com/dmoka/skills/tree/main/skills/adversarial-tester) (a skill in dmoka/skills, not in `.claude/agents/`) | Reviews a change against its acceptance criteria and the repo rules, proves what it can with failing tests, reports the rest as reasoned findings, gives a merge verdict | Every finding says how it is known: PROVED or REASONED |
 
-The five run as **Claude Code subagents** in a multi-critic loop — one coder, five critics, max 3 rounds. Loop rules in [`AGENTS.md`](AGENTS.md).
+The five run as **Claude Code subagents** in a multi-critic loop — one coder, five critics, max 3 rounds.
 
 ## See it catch a real bug
 

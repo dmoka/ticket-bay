@@ -1,30 +1,4 @@
-# TicketBay — Multi-Critic Testing Loop
-
-This repo runs a **multi-critic loop**: one coding agent writes code, five independent tester subagents try to tear it apart, and the code isn't done until all five come back green.
-
-## The loop
-
-1. The **coder** (the main agent session) writes or changes code.
-2. All five testers run as subagents, **in parallel**: `integration-tester`, `mutation-tester`, `property-tester`, `ui-tester` (in Claude Code: `.claude/agents/`; in other harnesses, hand each tester's brief to a fresh subagent), and the `adversarial-tester` skill from [dmoka/skills](https://github.com/dmoka/skills/tree/main/skills/adversarial-tester) (installed with the course skills; it runs its own fresh subagent and labels each finding PROVED or REASONED).
-3. All five green → done, ship it.
-4. Any failure → collect every finding into one report, hand it back to the coder, fix, go again.
-5. **Maximum 3 rounds.** Not converging by round 3 → stop and escalate to a human.
-6. **Only this change blocks.** Testers judge the lines this change added or changed and the behavior it changed. A bug that was already there goes in the report as "found, not caused by this change" and becomes new work — it never blocks, and it never starts another round.
-
-### What "green" means per lane
-
-Four lanes are green when their tests pass. `mutation-tester` is the exception:
-green means **no surviving mutant can change an amount the system pays anyone**,
-not zero survivors. Equivalent mutants exist and nobody can kill them — demanding
-zero makes the loop unable to converge. A single payout-changing survivor is red
-however high the score.
-
-A lane that could not run (no Docker, browsers missing, a red baseline that makes
-Stryker refuse) reports **BLOCKED**, never green. Blocked is not a pass.
-
-## The rule (non-negotiable)
-
-**Testers write tests, never source — and start with fresh context.** They may add or heal tests in their own lane, but the source code is read-only for them. And they never see the coder's reasoning — only the code. A critic that shares the author's context inherits the author's blind spots. Five critics only help if they're five independent pairs of eyes.
+# TicketBay
 
 ## Writing tests
 
