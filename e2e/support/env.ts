@@ -21,6 +21,7 @@ export const E2E_EVENTS = {
   refundAfterStart: "e2e-refund-after-start",
   adminCancel: "e2e-admin-cancel",
   bookAndPay: "e2e-book-and-pay",
+  signUpAndBook: "e2e-sign-up-and-book",
 } as const;
 
 export const E2E_CODE = { code: "WELCOME10", percent: 10 } as const;
