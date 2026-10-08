@@ -1,5 +1,0 @@
-batch_id,invoice_no,order_no,date,organizer,organizer_tax_no,customer,event,tickets,discount_pct,net_eur,vat_eur,gross_eur,vat_rate
-INV-2027-01-2,TB-202701-000001,TB-00002,2027-01-01,Arena,,"Kovács, ""Jr."" Ádám",RockFest 2026,1,0,78.74,21.26,100.00,27%
-INV-2027-01-2,TB-202701-000002,TB-00001,2027-01-15,Park Live Events Kft.,12345678-2-42,Kiss Anna,Park Night,2,0,97.20,26.25,123.45,27%
-INV-2027-01-2,TB-202701-000003,TB-00004,2027-01-31,Park Live Events Kft.,12345678-2-42,Tóth Béla,Park Night,1,0,78.74,21.26,100.00,27%
-INV-2027-01-2,TB-202701-000004,TB-00003,2027-01-15,Lakeside Festivals Kft.,23456789-2-14,Dr. Nagy-Kovács Erzsébet Mária,"Beach Fest, day 2",5,5,187.01,50.49,237.50,27%
