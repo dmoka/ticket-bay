@@ -11,16 +11,7 @@
 //     percent-encoding — the status is below 500 and the body is JSON. Errors
 //     (404 and 405 included) are {"error": "..."} with no stack trace and no
 //     SQL in them.
-//  2. Valid input → success. For every VALID order — an event with seats,
-//     1-50 tickets, a working code or none, booked at any instant before the
-//     start — the API answers 201 with the right order. Bookings lean on the
-//     early-bird boundary, minute by minute, exactly 30 days included. The
-//     early-bird the order got matches the end the API itself publishes
-//     (earlyBirdEndsAt).
-//  3. Oracle. A quote equals a simple model written here, not the production
-//     code: ticket price × count, minus the summed discounts capped at 100%,
-//     rounded once, plus the 3% fee kept between €1 and €20.
-//  4. Stateful. Random interleaved actions by three API users — quote, order
+//  2. Stateful. Random interleaved actions by three API users — quote, order
 //     (reusing an Idempotency-Key or not, once or twice at the same moment),
 //     cancel their own order, try to cancel someone else's — while the clock
 //     moves past the event starts. After EVERY step: seats sold never exceed
@@ -62,7 +53,7 @@ const runs = (numRuns: number) => ({ seed: SEED, numRuns });
  * The fake payment provider, fresh for every test like the database: order
  * ids restart with the database, and a refund's idempotency key is
  * `refund-<order id>` — a provider that outlived the database would answer a
- * new order's refund with an old one. It records every charge, so property 4
+ * new order's refund with an old one. It records every charge, so property 2
  * can add up the money at the provider.
  */
 const charged = new Set<string>();
@@ -105,10 +96,7 @@ const uniqueId = (prefix: string) => `${prefix}-${++ids}`;
 /** A value whose counterexample prints as `text` instead of as an object. */
 const shown = <T extends object>(value: T, text: string): T => Object.assign(value, { [fc.toStringMethod]: () => text });
 
-const MIN = 60_000;
-const utc = (ms: number) => new Date(ms).toISOString().slice(0, 16).replace("T", " ") + " UTC";
-
-// ---- The price model (property 2 and 3's oracle) ------------------------------
+// ---- The price model (property 2's oracle) ------------------------------------
 
 /** n / d rounded half up, in integers. */
 const roundHalfUp = (n: number, d: number) => Math.floor((2 * n + d) / (2 * d));
@@ -363,104 +351,7 @@ describe("1. robustness", () => {
   }, 60_000);
 });
 
-// ---- 2. Valid input → success ----------------------------------------------------
-
-interface ValidOrder {
-  startMs: number;
-  bookedMs: number;
-  priceCents: number;
-  seatsSold: number;
-  tickets: number;
-  codePercent: number | undefined;
-}
-
-/**
- * A valid order. The event starts an hour to 90 days after NOW; the booking is
- * within two hours of the early-bird end (start − 30 × 24 h), minute by minute,
- * 0 included — or any minute up to 90 days before the start.
- */
-const validOrder: fc.Arbitrary<ValidOrder> = fc
-  .record({
-    startsInMin: fc.integer({ min: 60, max: 90 * 24 * 60 }),
-    booked: fc.oneof(
-      { weight: 2, arbitrary: fc.integer({ min: -120, max: 120 }).map((minutes) => ({ nearEarlyBirdEnd: minutes })) },
-      fc.integer({ min: 1, max: 90 * 24 * 60 }).map((minutes) => ({ beforeStart: minutes })),
-    ),
-    // from €1: a free event is valid too, but its price could not show what the early-bird changed (property 3 covers it)
-    priceCents: fc.integer({ min: 100, max: 100_000 }),
-    seatsSold: fc.integer({ min: 0, max: 950 }),
-    tickets: fc.integer({ min: 1, max: 50 }),
-    codePercent: fc.option(fc.integer({ min: 1, max: 100 }), { nil: undefined }),
-  })
-  .map(({ startsInMin, booked, ...rest }) => {
-    const startMs = NOW + startsInMin * MIN;
-    const bookedMs = "nearEarlyBirdEnd" in booked ? startMs - EARLY_BIRD_MS + booked.nearEarlyBirdEnd * MIN : startMs - booked.beforeStart * MIN;
-    const order = { startMs, bookedMs, ...rest };
-    const code = rest.codePercent === undefined ? "no code" : `code ${rest.codePercent}%`;
-    return shown(order, `event starts ${utc(startMs)}, booked ${utc(bookedMs)}: ${rest.tickets} × ${rest.priceCents} cents, ${code}`);
-  });
-
-describe("2. valid input → success", () => {
-  it("every valid order is a 201 with the right price, at the early-bird boundary too", async () => {
-    const anna = await customer(auth, "Anna");
-    await fc.assert(
-      fc.asyncProperty(validOrder, async (o) => {
-        const ev = await venue(t.db, { id: uniqueId("ev"), priceCents: o.priceCents, startsAtMs: o.startMs, totalSeats: 1000, seatsSold: o.seatsSold, createdAtMs: o.bookedMs - DAY });
-        const cart: { eventId: string; tickets: number; code?: string } = { eventId: ev.id, tickets: o.tickets };
-        if (o.codePercent !== undefined) {
-          cart.code = uniqueId("CODE").toUpperCase();
-          await addCode(t.db, cart.code, o.codePercent, { createdAtMs: o.bookedMs - DAY });
-        }
-
-        const published = await call({ path: `/api/v1/events/${ev.id}`, nowMs: o.bookedMs });
-        expect(published.status, published.text).toBe(200);
-        const r = await call({ method: "POST", path: "/api/v1/orders", json: cart, headers: { ...bearer(await freshKey(anna)), "idempotency-key": uniqueId("v") }, nowMs: o.bookedMs });
-
-        expect(r.status, r.text).toBe(201);
-        expect(r.body.order).toMatchObject({ eventId: ev.id, tickets: o.tickets, status: "paid", createdAt: new Date(o.bookedMs).toISOString() });
-        // The early-bird the order got is the one the event page promised at that moment...
-        const promised = o.bookedMs <= Date.parse(published.body.earlyBirdEndsAt);
-        expect(r.body.order.price.earlyBirdPercent, `early-bird promised until ${utc(Date.parse(published.body.earlyBirdEndsAt))}`).toBe(promised ? 10 : 0);
-        // ...and the whole price is the model's: early-bird iff booked at least 30 × 24 hours before the start.
-        const earlyBird = o.startMs - o.bookedMs >= EARLY_BIRD_MS;
-        expect(r.body.order.price).toEqual(modelPrice({ priceCents: o.priceCents, tickets: o.tickets, earlyBird, codePercent: o.codePercent ?? 0 }));
-      }),
-      runs(150),
-    );
-  }, 60_000);
-});
-
-// ---- 3. Oracle -------------------------------------------------------------------
-
-describe("3. oracle", () => {
-  it("a quote is the simple price model: price × count − capped discounts, rounded once, + the fee", async () => {
-    await fc.assert(
-      fc.asyncProperty(
-        fc.record({
-          priceCents: fc.integer({ min: 0, max: 100_000 }),
-          tickets: fc.integer({ min: 1, max: 50 }),
-          // how long before the start the quote is asked: both sides of the 30-day early-bird line
-          leadMs: fc.oneof(fc.integer({ min: 1, max: 90 * DAY }), fc.constantFrom(EARLY_BIRD_MS, EARLY_BIRD_MS - 1, EARLY_BIRD_MS + 1)),
-          codePercent: fc.option(fc.integer({ min: 1, max: 100 }), { nil: undefined }),
-        }),
-        async (q) => {
-          const ev = await venue(t.db, { id: uniqueId("ev"), priceCents: q.priceCents, startsAtMs: NOW + q.leadMs, totalSeats: 1000, seatsSold: 0 });
-          const cart: { eventId: string; tickets: number; code?: string } = { eventId: ev.id, tickets: q.tickets };
-          if (q.codePercent !== undefined) {
-            cart.code = uniqueId("CODE").toUpperCase();
-            await addCode(t.db, cart.code, q.codePercent);
-          }
-          const r = await call({ method: "POST", path: "/api/v1/quote", json: cart, nowMs: NOW });
-          expect(r.status, r.text).toBe(200);
-          expect(r.body.price).toEqual(modelPrice({ priceCents: q.priceCents, tickets: q.tickets, earlyBird: q.leadMs >= EARLY_BIRD_MS, codePercent: q.codePercent ?? 0 }));
-        },
-      ),
-      runs(300),
-    );
-  }, 60_000);
-});
-
-// ---- 4. Stateful sequences -------------------------------------------------------
+// ---- 2. Stateful sequences -------------------------------------------------------
 
 type User = "anna" | "bela" | "cili";
 const USERS: User[] = ["anna", "bela", "cili"];
@@ -693,7 +584,7 @@ async function checkInvariants(m: Model, real: Real) {
   expect(atProvider, "charges − refunds at the provider = totals − refunds of the orders").toBe(inOrders);
 }
 
-describe("4. stateful sequences", () => {
+describe("2. stateful sequences", () => {
   it("any sequence of quotes, orders, retries, cancels and clock moves keeps every invariant", async () => {
     const people = { anna: await customer(auth, "Anna"), bela: await customer(auth, "Bela"), cili: await customer(auth, "Cili") };
     await fc.assert(

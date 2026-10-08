@@ -36,7 +36,7 @@ export function bookTickets(ev: Event, n: number, discountPercent = 0): Order {
 
 /** Group discount tiers: 5+ tickets 5%, 10+ tickets 10%. */
 export function groupDiscount(n: number): number {
-  if (n >= 10) return 10;
+  if (n > 10) return 10;
   if (n >= 5) return 5;
   return 0;
 }

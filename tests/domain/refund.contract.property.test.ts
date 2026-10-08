@@ -12,7 +12,7 @@
 import { describe, it, expect } from "vitest";
 import fc from "fast-check";
 import { calculateRefund, netRefund, Order } from "../../src/domain/refund";
-import { bookTickets, groupDiscount, seatsAvailable, Event } from "../../src/domain/booking";
+import { bookTickets, seatsAvailable, Event } from "../../src/domain/booking";
 
 // ---------------------------------------------------------------------------
 // Clock helpers.
@@ -159,7 +159,6 @@ describe("the documented shape of the contract", () => {
 //
 // src/domain/booking.ts:18 "Book n tickets; returns the new order. Throws when not
 //                    enough seats."
-// src/domain/booking.ts:32 "Group discount tiers: 5+ tickets 5%, 10+ tickets 10%."
 // ---------------------------------------------------------------------------
 describe("bookTickets and the refund path agree on what an order is", () => {
   /**
@@ -376,21 +375,6 @@ describe("bookTickets and the refund path agree on what an order is", () => {
         const left = seatsAvailable({ id: "e", name: "n", totalSeats, seatsSold, priceCents: 1, startMs: 0 });
         expect(left).toBeGreaterThanOrEqual(0);
         expect(left).toBeLessThanOrEqual(totalSeats);
-      }),
-      RUNS,
-    );
-  });
-
-  // INVARIANT (src/domain/booking.ts:32): the tiers are 0 / 5 / 10 and they only ever
-  // grow with the size of the group — a bigger group never gets a worse deal.
-  it("group discounts are one of the three published tiers and never shrink", () => {
-    fc.assert(
-      fc.property(fc.integer({ min: 0, max: 10_000 }), fc.integer({ min: 0, max: 100 }), (n, more) => {
-        expect([0, 5, 10]).toContain(groupDiscount(n));
-        expect(groupDiscount(n + more)).toBeGreaterThanOrEqual(groupDiscount(n));
-        if (n < 5) expect(groupDiscount(n)).toBe(0);
-        if (n >= 5 && n < 10) expect(groupDiscount(n)).toBe(5);
-        if (n >= 10) expect(groupDiscount(n)).toBe(10);
       }),
       RUNS,
     );

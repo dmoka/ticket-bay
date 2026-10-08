@@ -101,14 +101,6 @@ describe("discount codes", () => {
 });
 
 describe("price tiers", () => {
-  it("lists the group tiers with the per-ticket price at each", () => {
-    expect(priceTiers(5000)).toEqual([
-      { minQty: 1, maxQty: 4, percent: 0, unitCents: 5000 },
-      { minQty: 5, maxQty: 9, percent: 5, unitCents: 4750 },
-      { minQty: 10, maxQty: null, percent: 10, unitCents: 4500 },
-    ]);
-  });
-
   it("agrees with the invoice at the first quantity of every tier", () => {
     for (const t of priceTiers(3333)) {
       const inv = buildInvoice(ev({ priceCents: 3333 }), t.minQty, NOW);

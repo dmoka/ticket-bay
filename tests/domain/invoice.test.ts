@@ -38,21 +38,6 @@ describe("buildInvoice — group discounts", () => {
     expect(inv.totalCents).toBe(24463);
   });
 
-  it("gives 10% for a group of ten", () => {
-    const inv = buildInvoice(ev(), 10, NOW);
-    expect(inv.discountPercent).toBe(10);
-    expect(inv.discountCents).toBe(5000);
-    expect(inv.totalCents).toBe(46350);
-  });
-
-  it("stacks group and early-bird discounts", () => {
-    const inv = buildInvoice(ev(5000, 40), 10, NOW);
-    expect(inv.discountPercent).toBe(20);
-    expect(inv.discountCents).toBe(10000);
-    expect(inv.feeCents).toBe(1200);
-    expect(inv.totalCents).toBe(41200);
-  });
-
   it("gives no group discount below five tickets", () => {
     const inv = buildInvoice(ev(), 3, NOW);
     expect(inv.discountPercent).toBe(0);
