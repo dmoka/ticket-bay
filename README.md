@@ -75,6 +75,7 @@ A small public JSON API under `/api/v1` (route handlers in `app/api/v1`, logic i
 | `POST /api/v1/quote` | none | Body `{eventId, tickets, code?}` → the price breakdown. Books nothing |
 | `POST /api/v1/orders` | key, read & write | Same body, plus an `Idempotency-Key` header → books and pays. `201` new order, `200` replay of the same key |
 | `POST /api/v1/orders/{id}/cancel` | key, read & write | Cancels one of **your** orders → the refund. Someone else's order is `404 Order not found.` |
+| `POST /api/v1/orders/{id}/transfer` | key, read & write | Body `{email}` → gives the tickets of one of **your** paid orders to the TicketBay account with that email |
 
 - **Auth:** the same API keys as the MCP server (**Settings → Developers**), sent as `Authorization: Bearer tb_…`. No key or a bad key → `401`; a read-only key → `403`.
 - **Money** is integer cents; times are ISO 8601. `tickets` is a whole number from 1 to 50.

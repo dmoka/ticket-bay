@@ -20,6 +20,7 @@ import { earlyBirdEndsMs, type Invoice } from "../domain/invoice";
 import { resolveCaller } from "../mcp/caller";
 import { PaymentError, type PaymentProvider } from "../payments";
 import { cancelOwnOrder, OrderError, placeOrder, quoteOrder } from "../services/orders";
+import { transferOrder } from "../services/transfers";
 
 export interface ApiDeps {
   db: Db;
@@ -55,6 +56,8 @@ const CartBody = z.object({
     .regex(/^[A-Za-z0-9_-]{0,40}$/, "must be a discount code like WELCOME10")
     .optional(),
 });
+
+const TransferBody = z.object({ email: z.string().trim().min(1).max(254) });
 
 /** Same limit the MCP server puts on its idempotency_key. */
 const IdempotencyKey = z.string().trim().min(1).max(100);
@@ -246,5 +249,16 @@ export function cancelOrderEndpoint(deps: ApiDeps, request: Request, id: string)
       refund: { refundCents: r.refundCents, refundFeeCents: r.refundFeeCents, seatsReleased: r.seatsReleased },
       order: orderJson(r.order),
     });
+  });
+}
+
+/** POST /api/v1/orders/{id}/transfer — gives the tickets of one of the caller's paid orders to another account, named by email. */
+export function transferOrderEndpoint(deps: ApiDeps, request: Request, id: string): Promise<Response> {
+  return handle(request, async () => {
+    const caller = await writer(deps, request);
+    if (!OrderIdParam.safeParse(id).success) throw new ApiError(404, "Order not found.");
+    const body = await readBody(request, TransferBody);
+    const order = await transferOrder({ db: deps.db }, caller.userId, Number(id), body.email);
+    return Response.json({ order: orderJson(order) });
   });
 }
