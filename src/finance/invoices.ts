@@ -117,8 +117,8 @@ export async function invoiceExport(params: any, partial: Partial<InvoiceExportD
   const rows = res.rows;
   console.log("[invoices] " + rows.length + " paid orders");
 
-  // batch id: the month plus the first order in it, so finance can tell exports apart
-  const batchId = "INV-" + start.toISOString().substring(0, 7) + "-" + rows[0].id;
+  // batch id: the month plus the first order in it (0 when there is none), so finance can tell exports apart
+  const batchId = "INV-" + start.toISOString().substring(0, 7) + "-" + (rows.length > 0 ? rows[0].id : 0);
 
   const groups: any = {};
   const order: string[] = [];

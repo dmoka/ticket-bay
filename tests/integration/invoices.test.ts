@@ -71,6 +71,18 @@ const sp = (count: number) => " ".repeat(count);
 
 const CSV_HEADER = "batch_id,invoice_no,order_no,date,organizer,organizer_tax_no,customer,event,tickets,discount_pct,net_eur,vat_eur,gross_eur,vat_rate\n";
 
+/** Does this runtime honour a TZ change? 12:00 UTC on 31 January is 1 February on Kiritimati (UTC+14). */
+function tzChangeWorks(): boolean {
+  const tz = process.env.TZ;
+  process.env.TZ = "Pacific/Kiritimati";
+  try {
+    return new Date(Date.UTC(2027, 0, 31, 12)).getDate() === 1;
+  } finally {
+    if (tz === undefined) delete process.env.TZ;
+    else process.env.TZ = tz;
+  }
+}
+
 describe("which orders are invoiced", () => {
   it("one line per paid order of the month, one block per organizer, blocks in venue order and lines in order-id order", async () => {
     await park();
@@ -129,6 +141,18 @@ describe("which orders are invoiced", () => {
     expect(one.organizers[0].lines.map((l: { orderId: number }) => l.orderId)).toEqual([p.id]);
     const all = await exportMonth({ month: "2027-01", event: null });
     expect(all.totals.invoices).toBe(2);
+  });
+
+  it("a month with no paid orders is an empty export: no block, zero totals, header-only files, no mail, batch INV-YYYY-MM-0", async () => {
+    await park();
+    await order("park", { createdAtMs: FEB });
+    const r = await exportMonth({ month: "2027-01" });
+    expect(r).toMatchObject({ batchId: "INV-2027-01-0", month: "2027-01", organizers: [], totals: { invoices: 0, netCents: 0, vatCents: 0, grossCents: 0 }, emailsSent: 0 });
+    expect(csv()).toBe(CSV_HEADER);
+    expect(txt()).toBe("TICKETBAY - ORGANIZER INVOICES 2027-01\n" + `Batch INV-2027-01-0   generated ${new Date(NOW).toISOString()}\n\n`);
+    expect(fs.existsSync(path.join(dir, "outbox.log"))).toBe(false);
+    const none = await exportMonth({ month: "2027-02", event: "no-such-event" });
+    expect(none.totals.invoices).toBe(0);
   });
 
   it("the month defaults to the clock's month; the title and the subject carry it unpadded", async () => {
@@ -372,13 +396,6 @@ describe("the files and the mails", () => {
 });
 
 describe("pins current behaviour — suspected bugs", () => {
-  it("suspected bug: a month with no paid orders throws (TypeError on the first row) instead of exporting nothing", async () => {
-    await park();
-    await order("park", { createdAtMs: FEB });
-    await expect(exportMonth({ month: "2027-01" })).rejects.toThrow(TypeError);
-    await expect(exportMonth({ month: "2027-02", event: "no-such-event" })).rejects.toThrow(TypeError);
-  });
-
   it("suspected bug: a month that is not YYYY-MM throws RangeError (Invalid time value)", async () => {
     await park();
     await order("park");
@@ -415,7 +432,10 @@ describe("pins current behaviour — suspected bugs", () => {
     expect(txt()).toContain("TB-202701-000001" + sp(4) + `TB-${pad5(o.id)}` + sp(2) + "A Fan" + sp(19) + "1" + sp(4) + "         0.39" + "         0.11" + "         0.50\n");
   });
 
-  it("suspected bug: the default month follows the server's time zone while the window is UTC", async () => {
+  // The pin needs another time zone at run time. Node honours a TZ change in
+  // the main thread, not in a worker thread (process.env is a copy there), so
+  // under Stryker's vitest runner the pin is skipped, not red.
+  it.skipIf(!tzChangeWorks())("suspected bug: the default month follows the server's time zone while the window is UTC", async () => {
     const tz = process.env.TZ;
     process.env.TZ = "Pacific/Kiritimati"; // UTC+14
     try {

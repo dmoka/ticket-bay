@@ -129,13 +129,11 @@ const genWorld: fc.Arbitrary<GenWorld> = fc
   .chain((evs) =>
     fc.record({
       events: fc.constant(evs),
-      orders: fc.array(genOrder(evs.length), { minLength: 1, maxLength: 12 }),
+      orders: fc.array(genOrder(evs.length), { maxLength: 12 }),
       filter: fc.option(fc.integer({ min: 0, max: evs.length - 1 }), { nil: undefined }),
       seqStart: fc.oneof({ weight: 3, arbitrary: fc.constant(1) }, fc.integer({ min: 1, max: 999_999 }), fc.constant(1_000_000)),
     }),
   )
-  // Until "a month with no paid orders throws" (invoices.test.ts) is fixed, every world has an invoice in it.
-  .filter((w) => expectedOrders(w).length > 0)
   .map((w) => Object.assign(w, { [fc.toStringMethod]: () => JSON.stringify(w) }));
 
 /** The model: the orders the export must list, as indexes into w.orders. */
@@ -320,7 +318,7 @@ describe("invoice export invariants", () => {
 
         // 3. numbers
         expect(lines.map((l) => l.invoiceNo)).toEqual(lines.map((_, k) => `TB-202701-${String(w.seqStart + k).padStart(6, "0")}`));
-        expect(r.batchId).toBe(`INV-2027-01-${lines[0]!.orderId}`);
+        expect(r.batchId).toBe(`INV-2027-01-${lines[0]?.orderId ?? 0}`);
         expect(r.month).toBe("2027-01");
 
         // 4. the CSV
@@ -336,7 +334,8 @@ describe("invoice export invariants", () => {
 
         // 5. the mails
         expect(r.emailsSent).toBe(blocks.length);
-        const mails = fs.readFileSync(path.join(runDir, "outbox.log"), "utf8").split("\n-----\n").filter((m) => m !== "");
+        const outbox = path.join(runDir, "outbox.log");
+        const mails = fs.existsSync(outbox) ? fs.readFileSync(outbox, "utf8").split("\n-----\n").filter((m) => m !== "") : [];
         expect(mails.length).toBe(blocks.length);
         for (const [j, b] of blocks.entries()) {
           expect(mails[j]!.startsWith(`To: ${b.email}\nSubject: TicketBay invoices 2027-01 (${r.batchId})\n`)).toBe(true);
