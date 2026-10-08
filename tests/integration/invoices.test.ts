@@ -476,6 +476,20 @@ describe("pins current behaviour — suspected bugs", () => {
     }
   });
 
+  it("suspected bug: a venue named toString (any Object.prototype member) crashes the export — the organizer groups are a plain object", async () => {
+    await venue(t.db, { id: "proto", venue: "toString" });
+    await order("proto");
+    await expect(exportMonth()).rejects.toThrow(TypeError);
+  });
+
+  it("suspected bug: a venue named constructor is invoiced under 'Object' with no address — the organizer table is a plain object", async () => {
+    await venue(t.db, { id: "proto", venue: "constructor" });
+    await order("proto");
+    const r = await exportMonth();
+    expect(r.organizers[0]).toMatchObject({ organizer: "Object", email: undefined, taxNo: undefined });
+    expect(outbox()).toMatch(/^To: undefined\n/);
+  });
+
   it("suspected bug: an order with a 0 subtotal (a free event) gets discount_pct NaN", async () => {
     await park();
     await order("park", { subtotalCents: 0, discountCents: 0, ticketsCents: 0, totalCents: 100, feeCents: 100 });
