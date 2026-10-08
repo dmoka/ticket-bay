@@ -26,6 +26,7 @@ import { customer, makeAuth, revokeKey, scopedKey, useCleanAccounts, type Custom
 import { useTestDatabase } from "../integration/database";
 import { DAY, NOW, venue } from "../integration/fixtures";
 import { call, loadRoutes, quietRefusedKeyLogs, type Call, type Reply } from "./client";
+import { tidyReportsFolder } from "./reports-folder";
 
 const wiring = vi.hoisted(() => ({ auth: undefined as unknown, db: undefined as unknown, payments: undefined as unknown }));
 vi.mock("@/lib/auth", () => ({ appBaseURL: () => "http://localhost:3000", getAuth: () => wiring.auth }));
@@ -38,6 +39,7 @@ vi.mock("@/src/payments", async () => ({ ...(await import("../../src/payments"))
 const t = useTestDatabase();
 useCleanAccounts(t);
 quietRefusedKeyLogs();
+tidyReportsFolder();
 
 const SEED = Number(process.env.FC_SEED ?? 20261008);
 const runs = (numRuns: number) => ({ seed: SEED, numRuns });
