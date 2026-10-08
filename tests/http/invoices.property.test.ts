@@ -105,8 +105,9 @@ async function world(): Promise<World> {
   await order("park", { customerName: 'Kovács, "Jr." Ádám\n(VIP)', createdAtMs: JAN });
   await order("park", { customerName: "Dr. Nagy-Kovács Erzsébet Mária", quantity: 5, subtotalCents: 25_000, discountPercent: 5, discountCents: 1_250, ticketsCents: 23_750, feeCents: 713, totalCents: 24_463, createdAtMs: FEB - 1 });
   await order("park", { customerName: "", subtotalCents: 50, ticketsCents: 50, feeCents: 100, totalCents: 150 });
-  // A free order (100% discount) is left out until the pinned crash is fixed:
-  // invoices.test.ts "suspected bug: a free order in the month is a 500".
+  await order("park", { subtotalCents: 1, ticketsCents: 1, feeCents: 100, totalCents: 101 });
+  await order("park", { discountPercent: 100, discountCents: 10_000, ticketsCents: 0, feeCents: 100, totalCents: 100 });
+  await order("park", { subtotalCents: 0, discountCents: 0, ticketsCents: 0, feeCents: 100, totalCents: 100 }); // a free event
   // February 2027: the beach
   await order("beach", { createdAtMs: FEB + DAY });
   // refunded only

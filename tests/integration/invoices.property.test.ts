@@ -80,14 +80,8 @@ const instant = fc.oneof(
   { weight: 1, arbitrary: fc.integer({ min: JAN - 400 * DAY, max: FEB + 400 * DAY }) },
 );
 
-/**
- * A tickets amount in cents, from 3 cents to €10 million. Zero (a free order)
- * and 1 or 2 cents (a VAT of 0 cents) are left out until the pinned crashes
- * are fixed — invoices.test.ts "suspected bug: a free order (0 cents of
- * tickets) throws RangeError" and "suspected bug: an order of 1 or 2 cents
- * (its VAT rounds to 0) throws RangeError"; the second one this property found.
- */
-const amount = fc.oneof({ weight: 3, arbitrary: fc.integer({ min: 3, max: 1_000_000 }) }, fc.integer({ min: 3, max: 1_000_000_000 }), fc.constantFrom(3, 50, 99, 100, 127, 254, 12_700));
+/** A tickets amount in cents, from 0 (a free order) to €10 million. */
+const amount = fc.oneof({ weight: 3, arbitrary: fc.integer({ min: 0, max: 1_000_000 }) }, fc.integer({ min: 0, max: 1_000_000_000 }), fc.constantFrom(0, 1, 2, 3, 50, 99, 100, 127, 254, 12_700));
 
 interface GenEvent {
   venue: string;
@@ -113,16 +107,20 @@ interface GenWorld {
 }
 
 const genOrder = (eventCount: number): fc.Arbitrary<GenOrder> =>
-  fc.record({
-    event: fc.integer({ min: 0, max: eventCount - 1 }),
-    customer: text,
-    email: fc.constantFrom("fan@example.com", "ádám@example.com", 'odd,"@example.com'),
-    status: fc.constantFrom<"paid" | "refunded">("paid", "paid", "paid", "refunded"),
-    createdAtMs: instant,
-    quantity: fc.integer({ min: 1, max: 50 }),
-    ticketsCents: amount,
-    discountCents: fc.oneof({ weight: 2, arbitrary: fc.constant(0) }, fc.integer({ min: 0, max: 1_000_000 })),
-  });
+  fc
+    .record({
+      event: fc.integer({ min: 0, max: eventCount - 1 }),
+      customer: text,
+      email: fc.constantFrom("fan@example.com", "ádám@example.com", 'odd,"@example.com'),
+      status: fc.constantFrom<"paid" | "refunded">("paid", "paid", "paid", "refunded"),
+      createdAtMs: instant,
+      quantity: fc.integer({ min: 1, max: 50 }),
+      ticketsCents: amount,
+      discountCents: fc.oneof({ weight: 2, arbitrary: fc.constant(0) }, fc.integer({ min: 0, max: 1_000_000 })),
+    })
+    // A 0 subtotal (a free event) gets discount_pct NaN — pinned in invoices.test.ts
+    // "suspected bug: an order with a 0 subtotal (a free event) gets discount_pct NaN".
+    .filter((o) => o.ticketsCents + o.discountCents > 0);
 
 const genWorld: fc.Arbitrary<GenWorld> = fc
   .array(fc.record({ venue: venueName, name: text }), { minLength: 1, maxLength: 4 })
