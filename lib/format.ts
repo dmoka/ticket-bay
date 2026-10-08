@@ -13,7 +13,7 @@ export function money(cents: number): string {
   const abs = Math.abs(cents);
   const rest = abs % 100;
   const euros = (abs - rest) / 100;
-  return `${cents < 0 ? "−" : ""}€${grouped.format(euros)}.${String(rest).padEnd(2, "0")}`;
+  return `${cents < 0 ? "−" : ""}€${grouped.format(euros)}.${String(rest).padStart(2, "0")}`;
 }
 
 /** €1,235 — for KPI tiles and axes, where cents are noise. */
