@@ -2,7 +2,7 @@
 
 ## How refunds work
 
-You can cancel an order and get a refund at any time **until the event starts**. Cancel it under **My orders**, or ask your AI agent to do it with the `refund_order` tool.
+You can cancel an order and get a refund at any time **until the event starts**. Cancel it under **My orders**, or ask your AI agent to do it with the `refund_order` tool (an agent refunds up to €100.00 by itself; above that it sends you to the order page to cancel).
 
 You get back what you paid for the tickets, minus a **refund fee**:
 

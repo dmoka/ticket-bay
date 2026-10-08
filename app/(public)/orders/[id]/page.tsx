@@ -20,10 +20,10 @@ export default async function OrderPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ placed?: string }>;
+  searchParams: Promise<{ placed?: string; via?: string }>;
 }) {
   const id = Number((await params).id);
-  const { placed } = await searchParams;
+  const { placed, via } = await searchParams;
   const session = await requireSession(`/orders/${(await params).id}`);
   const found = isOrderId(id) ? await getOrderWithEvent(getDb(), id) : undefined;
   // Someone else's order is simply not found: an order number leaks nothing.
@@ -130,6 +130,11 @@ export default async function OrderPage({
       <section className="mt-8">
         <SectionLabel className="mb-3">Cancellation</SectionLabel>
         <div className="surface p-5">
+          {via === "mcp" && preview?.windowOpen && (
+            <div className="mb-4 rounded-md border border-amber-200 bg-amber-50/70 px-3 py-2 text-[13px] dark:border-amber-900 dark:bg-amber-950/30">
+              Your AI agent sent you here: this refund is more than it may make on its own. Nothing has changed yet — you decide.
+            </div>
+          )}
           {order.status === "refunded" ? (
             <div className="space-y-1.5 text-[14px]">
               <p className="flex items-baseline justify-between font-medium" data-testid="refund-line">

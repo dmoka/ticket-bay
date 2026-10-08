@@ -3,7 +3,7 @@
 // clock, tests call them with any clock they like.
 import { randomUUID } from "node:crypto";
 import { bookTickets, seatsAvailable } from "../domain/booking";
-import { previewCancellation } from "../domain/cancellation";
+import { previewCancellation, type CancellationPreview } from "../domain/cancellation";
 import { checkDiscountCode, normalizeCode, quote, type CodeCheck } from "../domain/pricing";
 import type { Invoice } from "../domain/invoice";
 import type { Db } from "../db/client";
@@ -337,6 +337,24 @@ export async function cancelOwnOrder(deps: Deps, userId: string, orderId: number
   const found = isOrderId(orderId) ? await getOrder(deps.db, orderId) : undefined;
   if (!found || found.userId !== userId) throw new OrderError("Order not found.");
   return cancelOrder(deps, orderId);
+}
+
+export interface OwnOrderPreview {
+  order: OrderRow;
+  event: EventRow;
+  /** what cancelling now would pay; null unless the order is still paid */
+  preview: CancellationPreview | null;
+}
+
+/**
+ * One of the account's orders and what cancelling it now would pay. The same
+ * ownership rule as cancelOwnOrder: someone else's order is "not found".
+ */
+export async function previewOwnOrder(deps: Pick<Deps, "db" | "nowMs">, userId: string, orderId: number): Promise<OwnOrderPreview> {
+  const found = isOrderId(orderId) ? await getOrderWithEvent(deps.db, orderId) : undefined;
+  if (!found || found.order.userId !== userId) throw new OrderError("Order not found.");
+  const preview = found.order.status === "paid" ? previewCancellation(toDomainOrder(found.order, found.event), deps.nowMs) : null;
+  return { order: found.order, event: found.event, preview };
 }
 
 export interface CancelEventResult {
