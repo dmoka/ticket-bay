@@ -437,6 +437,7 @@ describe("the tools' own guard (no route in front)", () => {
   it.each([
     ["book_tickets", { event_id: "x", quantity: 1 }],
     ["my_orders", {}],
+    ["my_next_event", {}],
     ["refund_order", { order_id: 1 }],
     ["cancel_event", { event_id: "x" }],
   ])("anonymous %s returns the 401-style tool error and writes nothing", async (tool, args) => {

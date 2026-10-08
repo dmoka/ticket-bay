@@ -72,10 +72,10 @@ async function orderCount(): Promise<number> {
 }
 
 describe("ADVERSARIAL anonymous callers never reach a private tool", () => {
-  it.each(["book_tickets", "my_orders", "refund_order", "cancel_event"])("%s refuses an anonymous caller and changes nothing", async (tool) => {
+  it.each(["book_tickets", "my_orders", "my_next_event", "refund_order", "cancel_event"])("%s refuses an anonymous caller and changes nothing", async (tool) => {
     clock = NOW;
     const ev = await venue(t.db);
-    const args = { book_tickets: { event_id: ev.id, quantity: 1 }, my_orders: {}, refund_order: { order_id: 1 }, cancel_event: { event_id: ev.id } }[tool]!;
+    const args = { book_tickets: { event_id: ev.id, quantity: 1 }, my_orders: {}, my_next_event: {}, refund_order: { order_id: 1 }, cancel_event: { event_id: ev.id } }[tool]!;
     const r = await call(null, tool, args);
     expect(isToolError(r)).toBeTruthy();
     expect(toolText(r)).toMatch(/401|unauthori[sz]ed/i);
