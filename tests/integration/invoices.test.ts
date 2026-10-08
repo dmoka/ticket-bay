@@ -396,7 +396,7 @@ describe("the files and the mails", () => {
 });
 
 describe("pins current behaviour — suspected bugs", () => {
-  it("suspected bug: a month that is not YYYY-MM throws RangeError (Invalid time value)", async () => {
+  it("suspected bug (function level): a month that is not YYYY-MM throws RangeError (Invalid time value) — the route refuses those with a 400 before the export", async () => {
     await park();
     await order("park");
     for (const month of ["banana", "2027", "2027-", "-1-1"]) {
