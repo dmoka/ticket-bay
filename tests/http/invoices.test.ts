@@ -144,9 +144,14 @@ describe("GET /api/v1/organizer/invoices", () => {
     expect(junkClock.body.month).toBe(`${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}`);
   });
 
-  it("pins current behaviour — suspected bug: a month that is not YYYY-MM is a 500", async () => {
+  it("a ?month that is not a month is a 400 that says the format; YYYY-M is taken, an empty ?month= means the clock's month", async () => {
     const anna = await customer(auth, "Anna");
-    expect(await get("?month=banana", bearer(anna.key))).toMatchObject({ status: 500, body: SERVER_ERROR });
+    for (const bad of ["banana", "2027", "2027-", "2027-13", "2027-00", "2027-01-15", "1969-12", "99999-01", " 2027-01", "2027-1.5"]) {
+      expect(await get(`?month=${encodeURIComponent(bad)}`, bearer(anna.key)), bad).toMatchObject({ status: 400, body: { error: "month: must be a month like 2027-01." } });
+    }
+    expect(await get("?month=%ZZ", bearer(anna.key))).toMatchObject({ status: 400, body: { error: "month: must be a month like 2027-01." } });
+    expect((await get("?month=2027-1", bearer(anna.key))).body.month).toBe("2027-01");
+    expect((await get("?month=", bearer(anna.key))).body.month).toBe("2027-01");
   });
 
   it("pins current behaviour — suspected bug: a free order in the month is a 500", async () => {

@@ -65,6 +65,15 @@ const IdempotencyKey = z.string().trim().min(1).max(100);
 /** Order ids are positive Postgres INTEGERs, written in decimal. */
 const OrderIdParam = z.string().regex(/^[1-9]\d{0,9}$/);
 
+/** A month for the invoice export: "2027-01" (or "2027-1"), from 1970 on. */
+const Month = z
+  .string()
+  .regex(/^\d{4}-\d{1,2}$/)
+  .refine((m) => {
+    const [y, mm] = m.split("-").map(Number);
+    return y! >= 1970 && y! <= 2999 && mm! >= 1 && mm! <= 12;
+  });
+
 async function readBody<T>(request: Request, schema: z.ZodType<T>): Promise<T> {
   let raw: unknown;
   try {
@@ -282,6 +291,9 @@ export function organizerInvoicesEndpoint(deps: ApiDeps, request: Request): Prom
     const q = new URL(request.url).searchParams;
     const event = q.get("event");
     if (event !== null && !EventId.safeParse(event).success) throw new ApiError(404, "Event not found.");
-    return Response.json(await invoiceExport({ event, month: q.get("month") }, { db: deps.db, nowMs: deps.now(request) }));
+    // ?month= (empty) means the same as no ?month: the request clock's month.
+    const month = q.get("month") || null;
+    if (month !== null && !Month.safeParse(month).success) throw new ApiError(400, "month: must be a month like 2027-01.");
+    return Response.json(await invoiceExport({ event, month }, { db: deps.db, nowMs: deps.now(request) }));
   });
 }

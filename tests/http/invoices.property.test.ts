@@ -130,15 +130,14 @@ const anyChar = fc.oneof(
 );
 const anyString = fc.oneof({ withCrossShrink: true }, fc.string({ unit: anyChar }), fc.string({ unit: "grapheme" }), fc.string({ unit: anyChar, maxLength: 3000, size: "max" }));
 
-/**
- * Months, in the spellings the export takes. Until the pinned crash is fixed
- * (invoices.test.ts: "a month that is not YYYY-MM is a 500") the generator
- * sends only well-formed ones: month 00 or 13, a huge year and garbage all
- * end in a 500 today.
- */
+/** Months: real ones in the spellings the route takes, out-of-range ones, other spellings, garbage. */
+const year = fc.oneof({ weight: 4, arbitrary: fc.constant("2027") }, fc.constantFrom("2026", "2028", "0000", "0001", "1969", "1970", "2999", "3000", "9999", "99999", "275760", "275761", "-2027", "2027.5", "１２３４"), fc.string({ maxLength: 6 }));
+const mon = fc.oneof({ weight: 4, arbitrary: fc.constantFrom("01", "02", "03") }, fc.integer({ min: 1, max: 12 }).map(String), fc.constantFrom("00", "13", "99", "1", "2", "3", "-1", "1.5", "0x1", " 1", "1 ", ""), fc.string({ maxLength: 3 }));
 const month = fc.oneof(
-  { weight: 3, arbitrary: fc.constantFrom("2027-01", "2027-1", "2027-01-15", "2027-02", "2027-03") },
-  fc.tuple(fc.integer({ min: 1970, max: 2100 }), fc.integer({ min: 1, max: 12 })).map(([y, m]) => `${y}-${m}`),
+  { weight: 3, arbitrary: fc.constantFrom("2027-01", "2027-1", "2027-02", "2027-03") },
+  { weight: 2, arbitrary: fc.tuple(year, mon).map(([y, m]) => `${y}-${m}`) },
+  fc.constantFrom("2027-01-15", "2027/01", "202701", "2027-Jan", "banana", "", " ", "2027-01\n", "null", "undefined", "2027-01-15", "-2027-01", "2027-1.5"),
+  anyString,
 );
 
 /** Events: with January orders, with February orders, with refunded orders only, with none, unknown, malformed, or anything. */
@@ -189,8 +188,7 @@ const query: fc.Arbitrary<string> = fc.oneof(
     const q = p.toString() + junk;
     return q ? `?${q.replace(/^&/, "")}` : "";
   }) },
-  // A bad escape stays out of ?month itself until "a month that is not YYYY-MM is a 500" is fixed.
-  { weight: 1, arbitrary: fc.tuple(fc.constantFrom("?event=", "?month=2027-01&event=", "?"), badEscape).map(([k, bad]) => `${k}${bad}`) },
+  { weight: 1, arbitrary: fc.tuple(fc.constantFrom("?month=", "?event=", "?month=2027-01&event=", "?"), badEscape).map(([k, bad]) => `${k}${bad}`) },
   { weight: 1, arbitrary: fc.constantFrom("?month=2027-01&month=banana", "?event=park&event=NOT%20AN%20ID", "?month=2027-01&event=park&event=", "?#", "??month=2027-01") },
 );
 
