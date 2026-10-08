@@ -15,7 +15,7 @@ export default async function MyOrdersPage() {
   return (
     <div>
       <h1 className="text-2xl font-semibold tracking-tight">My orders</h1>
-      <p className="mt-1.5 text-muted-foreground">Every order you booked with this account.</p>
+      <p className="mt-1.5 text-muted-foreground">Every order you booked with this account, and every order a friend transferred to you.</p>
 
       {(
         <div className="mt-8">

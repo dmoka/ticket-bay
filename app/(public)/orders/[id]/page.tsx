@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { CheckCircle2 } from "lucide-react";
 import { getDb } from "@/src/db/client";
-import { getOrderWithEvent, isOrderId, toDomainOrder } from "@/src/db/orders-repo";
+import { getOrderWithEvent, holderOf, isOrderId, toDomainOrder } from "@/src/db/orders-repo";
 import { previewCancellation } from "@/src/domain/cancellation";
 import { now } from "@/lib/clock";
 import { requireSession } from "@/lib/auth";
@@ -10,6 +10,7 @@ import { date, dateTime, money, orderNumber, time } from "@/lib/format";
 import { SectionLabel, StatusBadge } from "@/components/app/primitives";
 import { InvoiceLines } from "@/components/public/invoice-lines";
 import { CancelForm } from "./cancel-form";
+import { TransferForm } from "./transfer-form";
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }) {
   return { title: `Order ${orderNumber(Number((await params).id))}` };
@@ -27,7 +28,7 @@ export default async function OrderPage({
   const session = await requireSession(`/orders/${(await params).id}`);
   const found = isOrderId(id) ? await getOrderWithEvent(getDb(), id) : undefined;
   // Someone else's order is simply not found: an order number leaks nothing.
-  if (!found || found.order.userId !== session.user.id) notFound();
+  if (!found || holderOf(found.order) !== session.user.id) notFound();
   const { order, event: ev } = found;
   const nowMs = await now();
   const preview = order.status === "paid" ? previewCancellation(toDomainOrder(order, ev), nowMs) : null;
@@ -126,6 +127,16 @@ export default async function OrderPage({
           </div>
         </section>
       </div>
+
+      {order.status === "paid" && (
+        <section className="mt-8">
+          <SectionLabel className="mb-3">Transfer</SectionLabel>
+          <div className="surface flex items-center justify-between gap-6 p-5">
+            <p className="text-[13px] text-muted-foreground">Can&apos;t go? Give these tickets to a friend with a TicketBay account.</p>
+            <TransferForm orderId={order.id} />
+          </div>
+        </section>
+      )}
 
       <section className="mt-8">
         <SectionLabel className="mb-3">Cancellation</SectionLabel>
