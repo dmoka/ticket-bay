@@ -43,7 +43,10 @@ RED regardless of how high the score is.
 - Every killing test must assert a **business outcome**, never a mutant's behaviour.
   If you cannot state what the test protects in one sentence about money or users,
   you are writing a test to move a number — delete it.
-- Do not chase equivalent mutants. Prove equivalence, label it, move on.
+- Do not chase equivalent mutants, and never mark one equivalent yourself. Write the
+  proof in your report and ask the human. The `// Stryker disable next-line <Mutator>:
+  equivalent — <why>` comment goes into source only after their yes, and never by you:
+  source is read-only for you.
 - No-coverage mutants are findings too — the code isn't executed by any test.
 - Never change config to improve a score. The score is the messenger. Changing which
   files are mutated, raising a timeout, or excluding a test file to go green is the
