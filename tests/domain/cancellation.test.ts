@@ -1,7 +1,7 @@
 // What cancelling a whole order pays and does to the seats (src/domain/cancellation.ts).
 import { describe, it, expect } from "vitest";
 import fc from "fast-check";
-import { previewCancellation } from "../../src/domain/cancellation";
+import { AGENT_REFUND_LIMIT_CENTS, agentMayRefund, previewCancellation } from "../../src/domain/cancellation";
 import { netRefund } from "../../src/domain/refund";
 
 const START = 1_800_000_000_000;
@@ -50,5 +50,30 @@ describe("previewCancellation", () => {
         },
       ),
     );
+  });
+});
+
+describe("agentMayRefund", () => {
+  it("the limit is exactly €100.00", () => {
+    expect(AGENT_REFUND_LIMIT_CENTS).toBe(10_000);
+  });
+
+  it("allows up to and including the limit, refuses one cent above", () => {
+    expect(agentMayRefund(0)).toBe(true);
+    expect(agentMayRefund(9_999)).toBe(true);
+    expect(agentMayRefund(10_000)).toBe(true);
+    expect(agentMayRefund(10_001)).toBe(false);
+    expect(agentMayRefund(1_000_000)).toBe(false);
+  });
+
+  it("an order whose cancellation pays over the limit is one the agent must hand back", () => {
+    // €102.05 paid → 2% fee €2.04 → €100.01 net: one cent too much.
+    const over = previewCancellation(order(10_205, 1), START - 1);
+    expect(over.netCents).toBe(10_001);
+    expect(agentMayRefund(over.netCents)).toBe(false);
+    // €102.04 paid → fee €2.04 → €100.00 net: the agent may.
+    const edge = previewCancellation(order(10_204, 1), START - 1);
+    expect(edge.netCents).toBe(10_000);
+    expect(agentMayRefund(edge.netCents)).toBe(true);
   });
 });

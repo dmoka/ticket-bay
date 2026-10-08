@@ -14,11 +14,11 @@ import { getEvent, listEvents, toDomainEvent } from "../db/events-repo";
 import { listOrdersByUser, toDomainOrder } from "../db/orders-repo";
 import type { EventRow, OrderRow } from "../db/schema";
 import { seatsAvailable } from "../domain/booking";
-import { previewCancellation } from "../domain/cancellation";
+import { AGENT_REFUND_LIMIT_CENTS, agentMayRefund, previewCancellation } from "../domain/cancellation";
 import { buildInvoice, EARLY_BIRD_PERCENT, earlyBirdApplies, earlyBirdEndsMs } from "../domain/invoice";
 import { priceTiers } from "../domain/pricing";
 import type { PaymentProvider } from "../payments";
-import { cancelOwnOrder, OrderError, placeOrder, quoteOrder } from "../services/orders";
+import { cancelOwnOrder, OrderError, placeOrder, previewOwnOrder, quoteOrder } from "../services/orders";
 import { loadHelpDocs, searchDocs } from "./docs";
 
 /** Who is calling. null = anonymous: public tools only. */
@@ -175,7 +175,8 @@ export function createTicketBayServer(deps: ToolDeps, caller: Caller, opts: { in
         "Browse with list_events → get_event → quote_price. " +
         (opts.includePrivate
           ? "book_tickets charges the customer's card; always quote first and get the customer's explicit yes. " +
-            "refund_order cannot be undone; say the refund amount from my_orders before calling it."
+            `refund_order cannot be undone; say the refund amount from my_orders before calling it. It refunds up to €${eur(AGENT_REFUND_LIMIT_CENTS)} by itself; ` +
+            "above that it only returns a link to the order page, where the customer clicks Cancel order."
           : "This local server only browses. Booking needs TicketBay's remote MCP server with an API key.") +
         " For questions about refunds, discounts, fees or API keys, call search_docs and answer from the docs.",
     },
@@ -397,7 +398,9 @@ export function createTicketBayServer(deps: ToolDeps, caller: Caller, opts: { in
       description:
         "Cancel one of the customer's own orders and refund it NOW, by TicketBay's refund rules (refund fee kept; nothing back once the event has started). " +
         "Cannot be undone. Tell the customer the refund amount from my_orders and get an explicit yes first. " +
-        "Returns the refund and a link to the order page. Requires a read & write API key.",
+        `Refunds up to €${eur(AGENT_REFUND_LIMIT_CENTS)} by itself and returns the refund and a link to the order page. ` +
+        "A bigger refund is NOT made: the tool returns the order page link instead, and the customer clicks Cancel order there themselves. Give them the link. " +
+        "Requires a read & write API key.",
       inputSchema: z.object({ order_id: orderIdInput }),
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
     },
@@ -407,6 +410,23 @@ export function createTicketBayServer(deps: ToolDeps, caller: Caller, opts: { in
       return run(async () => {
         const id = parseOrderId(order_id);
         const nowMs = now();
+        // Above the agent limit the money stays put: the customer cancels on
+        // the order page. (An order already refunded in our books but not yet
+        // paid out has no preview; finishing that payout is not a new decision.)
+        const own = await previewOwnOrder({ db, nowMs }, c.userId, id);
+        if (own.preview && !agentMayRefund(own.preview.netCents)) {
+          const url = new URL(`/orders/${own.order.id}`, baseURL);
+          url.searchParams.set("via", "mcp");
+          return json({
+            refunded: false,
+            action_required:
+              `This refund is €${eur(own.preview.netCents)}, more than the €${eur(AGENT_REFUND_LIMIT_CENTS)} an agent may refund on its own. ` +
+              "Nothing has changed. Give the customer the link below; they click Cancel order on the page.",
+            agent_refund_limit_eur: eur(AGENT_REFUND_LIMIT_CENTS),
+            cancel_url: url.toString(),
+            ...orderSummary(own.order, own.event, nowMs, baseURL),
+          });
+        }
         const r = await cancelOwnOrder({ db, payments: deps.payments, nowMs }, c.userId, id);
         const ev = (await getEvent(db, r.order.eventId))!;
         return json({

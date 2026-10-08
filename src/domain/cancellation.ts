@@ -13,6 +13,17 @@ export interface CancellationPreview {
   releasesSeats: boolean;
 }
 
+/**
+ * The most an AI agent may refund on its own, in cents: €100.00. A bigger
+ * refund is the customer's own click on the order page.
+ */
+export const AGENT_REFUND_LIMIT_CENTS = 100_00;
+
+/** Whether an agent may pay out `netCents` by itself — up to and including the limit. */
+export function agentMayRefund(netCents: number): boolean {
+  return netCents <= AGENT_REFUND_LIMIT_CENTS;
+}
+
 /** What cancelling a whole order at `nowMs` pays and does to inventory. */
 export function previewCancellation(order: Order, nowMs: number): CancellationPreview {
   const grossCents = calculateRefund(order, order.tickets, nowMs);

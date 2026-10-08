@@ -48,7 +48,7 @@ claude mcp add ticketbay-local -- npx tsx "$PWD/mcp/server.ts"
 claude mcp add --transport http ticketbay http://localhost:3000/api/mcp --header "Authorization: Bearer tb_…"
 ```
 
-Without a key the public tools still work; a private tool answers `401` and says how to get a key. A read-only key can see your orders but is refused (`403`) on booking and refunds. `search_docs` answers policy questions from the help pages in [`help/`](help/). Dangerous actions only return a link: `cancel_event` points an admin at `/admin/events/<id>/cancel`, and nothing is cancelled until they confirm there.
+Without a key the public tools still work; a private tool answers `401` and says how to get a key. A read-only key can see your orders but is refused (`403`) on booking and refunds. `search_docs` answers policy questions from the help pages in [`help/`](help/). Dangerous actions only return a link: `cancel_event` points an admin at `/admin/events/<id>/cancel`, and nothing is cancelled until they confirm there; `refund_order` refunds up to €100 by itself and above that points the customer at `/orders/<id>`, where they click Cancel order.
 
 Self-hosted agents take the key the same way. [Hermes](https://github.com/NousResearch/hermes-agent), in `~/.hermes/config.yaml` with `TICKETBAY_API_KEY=tb_…` in `~/.hermes/.env`:
 

@@ -20,7 +20,8 @@
 //     refund_if_cancelled_now_eur; and each shape obeys the rule it states —
 //     window open: refund = tickets paid − refund fee; window closed (the event has
 //     started): refund = 0 and no refund fee is listed. refund_order at the same
-//     instant pays exactly what my_orders promised.
+//     instant pays exactly what my_orders promised — when that is at most
+//     €100.00; above it, it pays nothing and returns the order page link.
 //  6. Every spelling of an order id ("TB-00144", "tb-144", "144", 144) names the
 //     same order, and any schema-valid id that is not the caller's own order is
 //     a readable "Order not found." tool error — never a thrown exception.
@@ -400,7 +401,7 @@ describe("my_orders refund_breakdown and refund_order", () => {
   );
 
   it(
-    "refund_order pays exactly what my_orders promised at the same instant, and never more than the tickets part",
+    "refund_order pays exactly what my_orders promised at the same instant (up to €100.00, else only a link), and never more than the tickets part",
     async () => {
       await fc.assert(
         fc.asyncProperty(scenario, fc.nat(), async (s, spelling) => {
@@ -414,6 +415,17 @@ describe("my_orders refund_breakdown and refund_order", () => {
           const r = body(await call("refund_order", { order_id: spellings[spelling % spellings.length] }));
 
           expect(r.order_id).toBe(id);
+          if (cents(promised.refund_if_cancelled_now_eur) > 100_00) {
+            // Over the agent limit: no money moves, the customer gets the order page.
+            expect(r.refunded).toBe(false);
+            expect(r.status).toBe("paid");
+            expect(new URL(r.cancel_url).pathname).toBe(`/orders/${id}`);
+            expect(payments.getCharge((await t.db.select().from(orders))[0]!.paymentId)!.refundedCents).toBe(0);
+            const still = body(await call("my_orders", { status: "paid" })).orders[0];
+            expect(cents(still.refund_if_cancelled_now_eur)).toBe(cents(promised.refund_if_cancelled_now_eur));
+            return;
+          }
+          expect(r.refunded).toBe(true);
           expect(cents(r.refunded_eur)).toBe(cents(promised.refund_if_cancelled_now_eur));
           expect(cents(r.refund_fee_kept_eur)).toBe(cents(promised.refund_breakdown.refund_fee_eur ?? 0));
           expect(cents(r.refunded_eur)).toBeLessThanOrEqual(cents(promised.refund_breakdown.tickets_paid_eur));
