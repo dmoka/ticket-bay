@@ -6,10 +6,11 @@
 // few survivors that are provably equivalent (see README). Judging a pull
 // request on old survivors it didn't touch would make every PR red.
 //
-// Why "fail on any survivor": AGENTS.md says a payout-changing survivor is red
-// however high the score, and equivalent mutants exist. A machine can't tell
-// the two apart, so a survivor in changed code fails the gate. If it is truly
-// equivalent, mark it in the code with a reason the reviewer will see:
+// Why "fail on any survivor": a survivor in changed code is either a missing
+// test or an equivalent mutant, and a machine can't tell the two apart, so a
+// survivor fails the gate. Kill it with a test. AGENTS.md: an agent never
+// marks a mutant equivalent itself. It stops and asks a human, with the reason.
+// Only after a yes does the mark go in, with a reason the reviewer will see:
 //   // Stryker disable next-line <MutatorName>: equivalent — <why>
 //
 // Usage: node scripts/mutate-changed.mjs <base-ref>   (e.g. origin/main)
@@ -65,8 +66,9 @@ try {
   execFileSync("npx", ["stryker", "run", "stryker.changed.json"], { stdio: "inherit" });
 } catch {
   console.error(
-    "\nA mutant survived in the lines this change touched. Kill it with a test, or, if it is " +
-      "truly equivalent, mark it: // Stryker disable next-line <Mutator>: equivalent — <why>",
+    "\nA mutant survived in the lines this change touched. Kill it with a test. If you think it " +
+      "is equivalent, an agent stops and asks a human; only after a yes, mark it: " +
+      "// Stryker disable next-line <Mutator>: equivalent — <why>",
   );
   process.exit(1);
 }

@@ -148,7 +148,7 @@ npm install
 npm test              # all green. Looks done, right?
 ```
 
-Then run the loop (see `CLAUDE.md`): the testers read the docstring against the code, write the cancel-after-showtime test nobody wrote, and go red. The coder fixes the code — it can't touch the tests — and round two is green.
+Then run the loop (the branch's `CLAUDE.md` describes it): the testers read the docstring against the code, write the cancel-after-showtime test nobody wrote, and go red. The coder fixes the code — it can't touch the tests — and round two is green.
 
 The suite is not thin, either. That's the point. `npm run test:mutation` scores **95%** with zero uncovered mutants, and every surviving mutant is provably equivalent. A near-perfect mutation score, on code that will refund a sold-out stadium the morning after the show.
 
@@ -157,7 +157,7 @@ That is the lesson worth taking: mutation testing grades the tests you have agai
 ## Steal it
 
 1. Copy `.claude/agents/` into any repo, and install the `adversarial-tester` skill from [dmoka/skills](https://github.com/dmoka/skills).
-2. Copy the loop rules from `CLAUDE.md` into yours.
+2. Copy the loop rules from `CLAUDE.md` on the `demo/loop-recording` branch into yours.
 3. The example attacks reference this repo's domain (money, refunds, ticket counts) on purpose — concrete examples make agents sharper than generic instructions. Swap them for your domain's equivalents: the attack *shapes* (boundaries, odd splits, degenerate inputs, the gap between code and tests) are what transfer.
 4. Ask Claude Code to run the testers after any change.
 
