@@ -1,0 +1,145 @@
+{
+  "attention": {
+    "level": "high",
+    "whatHappened": "A paid order's tickets can be moved to another account by email, from the order page or the REST API; the booker keeps the refund path.",
+    "why": "The spec says the old owner cannot refund a transferred ticket, but cancelOwnOrder is not in the diff and still matches the booker, so a refund can pay the booker's card while the friend holds the tickets.",
+    "file": "src/services/transfers.ts",
+    "line": 28,
+    "code": "setHolder(db, orderId, friend.id)"
+  },
+  "whatItDoes": "Adds a nullable `holder_id` to orders and a `transferOrder` service that sets it to the account found by email, when the caller holds the order and it is paid. My orders, the order page and the MCP `my_orders` tool now key on the holder; a form on the order page and `POST /api/v1/orders/{id}/transfer` call the service.",
+  "why": "A customer can give the tickets of a paid order to a friend.",
+  "points": [
+    "orders get a nullable [holder_id](src/db/schema.ts:67); `holderOf` returns the holder, else the booker",
+    "[transferOrder](src/services/transfers.ts:16) checks holder and paid status, finds the friend by lowercased email, then calls `setHolder`",
+    "[My orders](src/db/orders-repo.ts:56), the [order page](app/(public)/orders/[id]/page.tsx:31) and the MCP `my_orders` tool key on the holder",
+    "two entry points: a [form](app/(public)/orders/[id]/transfer-form.tsx) on the order page and [POST /api/v1/orders/{id}/transfer](src/api/v1.ts:256)",
+    "nothing in the diff reads the event start or changes `cancelOwnOrder`; spec criteria 3 and 5 have no line to point at",
+    "[retries: 2](playwright.config.ts:11) for every e2e test arrives in the tests commit with no stated reason"
+  ],
+  "shape": [
+    {
+      "title": "What transferOrder checks, in order",
+      "kind": "call-tree",
+      "lang": "text",
+      "code": "transferOrder({ db }, userId, orderId, friendEmail)\n  getOrder(orderId)\n  holderOf(order) === userId        else \"Order not found.\"\n  order.status === \"paid\"           else \"Only a paid order can be transferred.\"\n  user WHERE email = lower(trim)    else \"No TicketBay account uses this email…\"\n  friend.id !== userId              else \"These tickets are already yours.\"\n  setHolder(orderId, friend.id)     UPDATE orders … WHERE id = ? AND status = 'paid'\n  getOrder(orderId)\n\n  (no nowMs, no event read)"
+    },
+    {
+      "title": "The orders table",
+      "kind": "schema",
+      "lang": "diff",
+      "code": " orders\n   user_id    text → user.id     the booker; never changes\n+  holder_id  text → user.id     null = the booker still holds\n+  orders_holder_idx (holder_id)\n   customer_email, customer_name  stay the booker's"
+    }
+  ],
+  "diagrams": [
+    {
+      "title": "Who follows the holder, who follows the booker",
+      "kind": "flowchart",
+      "mermaid": "flowchart LR\n  T[\"transferOrder\"] --> H[\"holder = holder_id ?? user_id\"]\n  P[\"order page gate\"] --> H\n  L[\"listOrdersByUser: My orders, MCP my_orders\"] --> H\n  X[\"cancel: web action, REST cancel, MCP refund_order\"] --> C[\"cancelOwnOrder (not in the diff)\"]\n  C --> B[\"booker = user_id\"]",
+      "caption": "Three readers resolve the holder. Every refund path resolves the booker, in `src/services/orders.ts:338`."
+    }
+  ],
+  "chapters": [
+    { "title": "What was asked", "description": "The five acceptance criteria. The two high items check criteria 3 and 5.", "files": ["docs/specs/ticket-transfer-4.3-start.md"] },
+    { "title": "The holder column", "description": "A nullable holder_id, the helper that resolves it, the My orders query and the update.", "files": ["src/db/schema.ts", "drizzle/0003_order_holder.sql", "src/db/orders-repo.ts"] },
+    { "title": "The transfer service", "description": "The gates, the email lookup, the one UPDATE. Its integration test follows.", "files": ["src/services/transfers.ts"] },
+    { "title": "The REST entry point", "description": "The endpoint, its route file and the README row.", "files": ["src/api/v1.ts", "app/api/v1/orders/[id]/transfer/route.ts", "README.md"] },
+    { "title": "The web entry point", "description": "The server action, the form, the order page gate and the My orders copy.", "files": ["app/(public)/orders/[id]/actions.ts", "app/(public)/orders/[id]/transfer-form.tsx", "app/(public)/orders/[id]/page.tsx", "app/(public)/orders/page.tsx"] },
+    { "title": "E2E test and config", "description": "The browser path, its fixtures, and the retry setting.", "files": ["e2e/support/env.ts", "e2e/transfer.spec.ts", "playwright.config.ts"] }
+  ],
+  "explains": [
+    { "quote": "ticket transfer spec", "files": ["docs/specs/ticket-transfer-4.3-start.md"] },
+    { "quote": "a holder column, so an order's tickets can move to another account", "files": ["src/db/schema.ts", "drizzle/0003_order_holder.sql", "src/db/orders-repo.ts"] },
+    { "quote": "give a paid order's tickets to a friend's account (service + POST /api/v1/orders/{id}/transfer)", "files": ["src/services/transfers.ts", "src/api/v1.ts", "app/api/v1/orders/[id]/transfer/route.ts", "README.md"] },
+    { "quote": "order page: Transfer form", "files": ["app/(public)/orders/[id]/page.tsx", "app/(public)/orders/[id]/transfer-form.tsx", "app/(public)/orders/[id]/actions.ts"] },
+    { "quote": "My orders lists the orders you hold", "files": ["app/(public)/orders/page.tsx", "src/db/orders-repo.ts"] },
+    { "quote": "ticket transfer happy paths (service + e2e)", "files": ["tests/integration/transfers.test.ts", "e2e/transfer.spec.ts", "e2e/support/env.ts"] },
+    { "quote": "Only the order's owner can transfer its tickets.", "files": ["src/services/transfers.ts"] },
+    { "quote": "The friend must have a TicketBay account; the transfer names them by email.", "files": ["src/services/transfers.ts"] },
+    { "quote": "A transfer is possible only before the event starts.", "files": [] },
+    { "quote": "After the transfer, the friend sees the ticket in My orders, and the owner no longer does.", "files": ["src/db/orders-repo.ts", "app/(public)/orders/page.tsx", "app/(public)/orders/[id]/page.tsx"] },
+    { "quote": "A transferred ticket can't be refunded by the old owner.", "files": [] }
+  ],
+  "claims": [
+    {
+      "quote": "Only the order's owner can transfer its tickets.",
+      "file": "src/services/transfers.ts", "line": 19, "code": "holderOf(order) !== userId",
+      "note": "The gate is the holder, not the booker: after one transfer the friend can transfer on, and the booker cannot. Check whether 'owner' means the holder."
+    },
+    {
+      "quote": "The friend must have a TicketBay account; the transfer names them by email.",
+      "file": "src/services/transfers.ts", "line": 24, "code": "eq(user.email, email)",
+      "note": "Looked up on the trimmed, lowercased email. Better Auth lowercases emails at sign-up, so a mixed-case account email still matches."
+    },
+    {
+      "quote": "A transfer is possible only before the event starts.",
+      "file": "src/services/transfers.ts", "line": 20, "code": "order.status !== \"paid\"",
+      "note": "This is the only gate. The service reads no clock and no event. See the high item on this line."
+    },
+    {
+      "quote": "After the transfer, the friend sees the ticket in My orders, and the owner no longer does.",
+      "file": "src/db/orders-repo.ts", "line": 56, "code": "eq(orders.holderId, userId)",
+      "note": "The web My orders page and the MCP my_orders tool both run this query. The second integration test pins it."
+    },
+    {
+      "quote": "A transferred ticket can't be refunded by the old owner.",
+      "file": "src/services/transfers.ts", "line": 28, "code": "setHolder(db, orderId, friend.id)",
+      "note": "Nothing in the diff changes cancelOwnOrder, which matches the booker. Check as the booker after a transfer with the REST cancel route or the MCP refund_order tool."
+    }
+  ],
+  "items": [
+    {
+      "severity": "high", "file": "src/services/transfers.ts", "line": 20, "code": "order.status !== \"paid\"",
+      "title": "The only gate is the paid status; nothing checks the event start",
+      "why": "The spec says a transfer is possible only before the event starts. transferOrder takes { db } only and reads neither a clock nor the event's startsAtMs. Both callers have a clock in scope (deps.now(request) at src/api/v1.ts:261, now() in actions.ts) and pass none. Check what happens when the holder transfers tickets for a show that already started."
+    },
+    {
+      "severity": "high", "file": "src/services/transfers.ts", "line": 28, "code": "setHolder(db, orderId, friend.id)",
+      "title": "After this update the booker can still refund the order",
+      "why": "cancelOwnOrder (src/services/orders.ts:338, not in the diff) matches found.userId, the booker, not the holder. Reproduce as the booker after a transfer: POST /api/v1/orders/{id}/cancel, or the MCP refund_order tool. The refund pays the booker's card, markRefunded releases the seats, and the friend's order turns refunded. The spec says a transferred ticket can't be refunded by the old owner."
+    },
+    {
+      "severity": "medium", "file": "app/(public)/orders/[id]/page.tsx", "line": 142, "code": "Cancellation",
+      "title": "The new holder sees the Cancel form but cannot cancel",
+      "why": "The gate on line 31 now admits the holder, so the friend sees the cancel preview and button. cancelOrderAction calls cancelOwnOrder, which matches the booker's userId, so the friend gets 'Order not found.' Check who the spec means by 'owner' for a refund after a transfer."
+    },
+    {
+      "severity": "medium", "file": "src/db/orders-repo.ts", "line": 66, "code": "eq(orders.status, \"paid\")",
+      "title": "The WHERE guards the status but not the current holder",
+      "why": "markRefunded puts its guard in the WHERE so two callers cannot both win. setHolder checks only status = 'paid', so two transfers from the same holder to two friends both return true; the last write wins and the other friend was told the tickets are theirs. Check whether a holder guard belongs in this WHERE."
+    },
+    {
+      "severity": "medium", "file": "playwright.config.ts", "line": 11, "code": "retries: 2",
+      "title": "Every e2e test now retries twice; no commit says why",
+      "why": "Added in the tests commit. The comment four lines down says failures on a money path have to be diagnosable without a rerun. Two retries let a flaky test, for example a transfer race, pass in CI. Check whether transfer.spec.ts passes with retries at 0."
+    },
+    {
+      "severity": "medium", "file": "tests/integration/transfers.test.ts", "line": 28, "code": "before the event",
+      "title": "No test pins a refusal",
+      "why": "Both tests are happy paths, as the commit says. Nothing exercises spec criteria 1, 3 and 5: a stranger's order, a transfer after the event starts, a refund by the booker after the transfer. The five throw lines in transfers.ts have no test; AGENTS.md says CI runs a mutation check, and an untested throw is a survivor there."
+    },
+    {
+      "severity": "low", "file": "app/(public)/orders/[id]/page.tsx", "line": 31, "code": "holderOf(found.order) !== session.user.id",
+      "title": "The holder sees the booker's name, charge id and invoice",
+      "why": "The whole page is now shown to the friend: 'Placed … by' with the booker's customerName, the charge id prefix under Payment, and the invoice with the discount code. Check which of these the spec wants the friend to see."
+    }
+  ],
+  "fileNotes": {
+    "docs/specs/ticket-transfer-4.3-start.md": "**Five criteria; the diff has code for 1, 2 and 4.**\n- criterion 3 (before the event starts): no clock reaches `transferOrder`\n- criterion 5 (no refund by the old owner): `cancelOwnOrder` is not in the diff",
+    "src/db/schema.ts": "**One nullable column, `holderId`, a second FK to `user`.**\n- null means the booker still holds the tickets\n- `userId` keeps the booker; `customerEmail` and `customerName` stay the booker's too\n- the admin order search in `admin-queries.ts` still matches on `customerEmail`, so admin sees the booker only",
+    "drizzle/0003_order_holder.sql": "**Adds the column, its FK and an index; drops nothing.**\n- `ON DELETE no action`, same as `user_id`\n- `0003_snapshot.json` and `_journal.json` are the generated pair",
+    "src/db/orders-repo.ts": "**Three additions: `holderOf`, a holder-aware `listOrdersByUser`, and `setHolder`.**\n- `holderOf` = `holderId ?? userId`\n- `listOrdersByUser` now matches `holder_id = me OR (holder_id IS NULL AND user_id = me)`; the MCP `my_orders` tool shares it\n- `setHolder` guards on `status = 'paid'` only; `markRefunded` below shows the WHERE-guard pattern\n- `listOrdersByEmail` is unchanged and has no caller in `app/` or `src/`",
+    "src/services/transfers.ts": "**The whole rule: holder, paid, friend by email, not yourself, then one UPDATE.**\n- no `nowMs` and no event read, so a transfer after the show runs\n- the email is trimmed and lowercased; Better Auth lowercases at sign-up, so the lookup matches\n- `setHolder` and the re-read are two statements with no transaction; a refund in between is caught by the `status` guard\n- the top comment says the payment stays as it was: a refund by the booker, or an event cancellation, pays the booker's card",
+    "tests/integration/transfers.test.ts": "**Two happy paths against real Postgres and Better Auth.**\n- test 1 checks `holderId`, status and quantity after the transfer\n- test 2 checks My orders moves; the email is passed upper-cased with spaces\n- no refusal is tested: stranger, unpaid, unknown email, self, after start",
+    "src/api/v1.ts": "**One new endpoint, built like `cancelOrderEndpoint`.**\n- `writer` enforces a read & write key; a bad id is a 404, like someone else's order\n- `TransferBody` accepts any 1–254 character string; the service applies the email regex and answers 422\n- `deps.now(request)` is in scope and not passed\n- `orderJson` has no holder field, so the answer cannot show who holds the order now",
+    "app/api/v1/orders/[id]/transfer/route.ts": "**Route wiring only; `endpoint` answers 405 for every other method.**",
+    "README.md": "**One table row for the new endpoint.**\n- the row says 'one of your paid orders'; 'your' means the holder after a transfer",
+    "app/(public)/orders/[id]/actions.ts": "**A server action that calls the service and redirects to My orders.**\n- `OrderError` becomes the form error; anything else rethrows\n- `now()` is imported for the cancel action and not passed here\n- `revalidatePath(\"/orders\")` then `redirect`; the old holder lands on a list without the order",
+    "app/(public)/orders/[id]/transfer-form.tsx": "**A client form: email input, Transfer button, error line.**\n- `type=\"email\" required` is browser-side only; the service re-validates\n- the Playwright test finds the input by the `Friend's email` label",
+    "app/(public)/orders/[id]/page.tsx": "**The page gate moves from booker to holder; a Transfer section appears for paid orders.**\n- line 31: the booker gets 404 after a transfer, the friend gets the page\n- the Transfer section shows whenever `status === \"paid\"`, before or after the event\n- the Cancellation section below is unchanged and shows the Cancel form to the holder; `cancelOwnOrder` refuses them\n- the friend sees the booker's name, the charge id prefix and the invoice",
+    "app/(public)/orders/page.tsx": "**One sentence of copy; the data change is in `listOrdersByUser`.**",
+    "e2e/support/env.ts": "**One event and two users for the transfer spec.**\n- `seed.ts` loops over `E2E_EVENTS` and `E2E_USERS`, so both are seeded",
+    "e2e/transfer.spec.ts": "**One browser path: book, transfer, old owner's list empty, friend's list shows it.**\n- both contexts run at `BOOKING_AT_MS`; no after-start case\n- the friend signs in from a second browser context, so cookies do not mix",
+    "playwright.config.ts": "**`retries: 2` for every e2e test, added in the tests commit.**\n- no commit message mentions it\n- the comment on line 15 says failures on a money path have to be diagnosable without a rerun"
+  }
+}
