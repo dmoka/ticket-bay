@@ -1,4 +1,3 @@
-// AI-style suite: round numbers only, boundaries untested.
 import { describe, it, expect } from "vitest";
 import { serviceFee, vatPortion } from "../../src/domain/fees";
 
@@ -11,6 +10,12 @@ describe("serviceFee", () => {
   });
   it("caps the fee on huge orders", () => {
     expect(serviceFee(100000)).toBe(2000);
+  });
+  it("charges the minimum when 3% comes to 99 cents", () => {
+    expect(serviceFee(3300)).toBe(100);
+  });
+  it("caps the fee when 3% comes to 2001 cents", () => {
+    expect(serviceFee(66700)).toBe(2000);
   });
 });
 
