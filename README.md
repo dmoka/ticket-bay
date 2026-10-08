@@ -38,7 +38,7 @@ TicketBay is also an MCP server, so a customer's AI agent can browse, book and r
 | | Local | Remote |
 |---|---|---|
 | Entry | `mcp/server.ts` (stdio) | `app/api/mcp/route.ts` (Streamable HTTP, `/api/mcp`) |
-| Tools | public: `list_events`, `get_event`, `quote_price`, `search_docs` | public + private: `my_orders` (read), `book_tickets`, `refund_order`, `cancel_event` (write; `cancel_event` is admin-only and only returns a link) |
+| Tools | public: `list_events`, `get_event`, `quote_price`, `search_docs` | public + private: `my_orders`, `my_next_event` (read), `book_tickets`, `refund_order`, `cancel_event` (write; `cancel_event` is admin-only and only returns a link) |
 | Auth | none — the client starts it on your machine | `Authorization: Bearer tb_…`, a key from **Settings → Developers** — **Read only** or **Read & write** |
 
 ```bash

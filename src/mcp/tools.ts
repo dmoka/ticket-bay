@@ -40,12 +40,13 @@ export interface ToolDeps {
 }
 
 export const PUBLIC_TOOLS = ["list_events", "get_event", "quote_price", "search_docs"] as const;
-export const PRIVATE_TOOLS = ["book_tickets", "my_orders", "refund_order", "cancel_event"] as const;
+export const PRIVATE_TOOLS = ["book_tickets", "my_orders", "my_next_event", "refund_order", "cancel_event"] as const;
 
 /** The key scope each private tool needs. A read-only key gets tickets:read only. */
 const SCOPE: Record<(typeof PRIVATE_TOOLS)[number], string> = {
   book_tickets: "tickets:write",
   my_orders: "tickets:read",
+  my_next_event: "tickets:read",
   refund_order: "tickets:write",
   cancel_event: "tickets:write",
 };
@@ -387,6 +388,45 @@ export function createTicketBayServer(deps: ToolDeps, caller: Caller, opts: { in
       const nowMs = now();
       const rows = (await listOrdersByUser(db, c.userId)).filter(({ order }) => status === "all" || order.status === status);
       return json({ customer: c.email, count: rows.length, orders: rows.map(({ order, event }) => orderSummary(order, event, nowMs, baseURL)) });
+    },
+  );
+
+  server.registerTool(
+    "my_next_event",
+    {
+      title: "My next event",
+      description:
+        "The signed-in customer's next upcoming event they hold paid tickets for, and how many tickets they have for it " +
+        "(all their paid orders for that event added up; refunded orders do not count). " +
+        "Answers 'what am I going to next?' and 'how many tickets do I have for it?'. " +
+        "Returns next_event: null when the customer holds no paid tickets for any upcoming event. " +
+        "Only ever looks at the caller's own orders. Requires an API key (read-only is enough).",
+      inputSchema: z.object({}),
+      annotations: { readOnlyHint: true, openWorldHint: false },
+    },
+    async () => {
+      const c = who("my_next_event");
+      if (isResult(c)) return c;
+      const nowMs = now();
+      const upcoming = (await listOrdersByUser(db, c.userId)).filter(({ order, event }) => order.status === "paid" && event.startsAtMs > nowMs);
+      if (upcoming.length === 0) {
+        return json({ customer: c.email, next_event: null, note: "No paid tickets for any upcoming event." });
+      }
+      const ev = upcoming.reduce((soonest, { event }) => (event.startsAtMs < soonest.startsAtMs ? event : soonest), upcoming[0].event);
+      const held = upcoming.filter(({ event }) => event.id === ev.id).map(({ order }) => order);
+      return json({
+        customer: c.email,
+        next_event: {
+          id: ev.id,
+          name: ev.name,
+          venue: ev.venue,
+          city: ev.city,
+          starts_at: localTime(ev.startsAtMs),
+          url: new URL(`/events/${ev.id}`, baseURL).toString(),
+        },
+        tickets: held.reduce((n, o) => n + o.quantity, 0),
+        orders: held.map((o) => ({ order_number: orderNumber(o.id), tickets: o.quantity, url: new URL(`/orders/${o.id}`, baseURL).toString() })),
+      });
     },
   );
 

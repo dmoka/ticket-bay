@@ -6,7 +6,7 @@
 //     "tickets:write ", "tickets:*", junk, duplicates, empty) and any private tool,
 //     the tool runs iff the exact scope it needs is in the set:
 //     book_tickets / refund_order / cancel_event need "tickets:write",
-//     my_orders needs "tickets:read". Anonymous callers never run a private tool.
+//     my_orders and my_next_event need "tickets:read". Anonymous callers never run a private tool.
 //  2. A refused call writes nothing: orders, events and the payment provider's
 //     charges are exactly as before, and the refusal is a readable tool error
 //     (isError), not an exception.
@@ -30,6 +30,7 @@ const DAY = 86_400_000;
 const NEEDS: Record<(typeof PRIVATE_TOOLS)[number], string> = {
   book_tickets: "tickets:write",
   my_orders: "tickets:read",
+  my_next_event: "tickets:read",
   refund_order: "tickets:write",
   cancel_event: "tickets:write",
 };
@@ -93,6 +94,7 @@ describe("private tools and key scopes", () => {
           const args = {
             book_tickets: { event_id: "ev", quantity: 1, idempotency_key: "scope-test" },
             my_orders: {},
+            my_next_event: {},
             refund_order: { order_id: order.id },
             cancel_event: { event_id: "ev" },
           }[tool];

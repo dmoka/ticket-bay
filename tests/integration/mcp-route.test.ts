@@ -205,6 +205,7 @@ describe("anonymous callers", () => {
   it.each([
     ["book_tickets", { event_id: "any", quantity: 1 }],
     ["my_orders", {}],
+    ["my_next_event", {}],
     ["refund_order", { order_id: 1 }],
     ["cancel_event", { event_id: "any" }],
   ])("get a 401 with the readable message from %s", async (tool, args) => {

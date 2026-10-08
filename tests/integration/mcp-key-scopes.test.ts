@@ -95,6 +95,10 @@ describe("a read-only key", () => {
     expect(mine.isError, mine.text).toBe(false);
     expect(mine.data).toMatchObject({ customer: anna.email, count: 1 });
 
+    const next = toolResult(await call("my_next_event", {}, bearer(ro.key)));
+    expect(next.isError, next.text).toBe(false);
+    expect(next.data).toMatchObject({ customer: anna.email, next_event: { id: ev.id }, tickets: 2 });
+
     for (const [tool, args] of [
       ["book_tickets", { event_id: ev.id, quantity: 1 }],
       ["refund_order", { order_id: booked.order_id }],
