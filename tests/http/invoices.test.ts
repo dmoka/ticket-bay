@@ -124,18 +124,24 @@ describe("GET /api/v1/organizer/invoices", () => {
     expect(r.body.organizers[0].lines[0]).toMatchObject({ customer: "Kiss Anna", customerEmail: "anna@example.com" });
   });
 
-  it("pins current behaviour — suspected bug: a month with no paid orders is a 500", async () => {
+  it("a month with no paid orders is an empty export: 200, no block, zero totals, no mail", async () => {
     const anna = await customer(auth, "Anna");
-    expect(await get("?month=2027-01", bearer(anna.key))).toMatchObject({ status: 500, body: SERVER_ERROR });
+    const r = await get("?month=2027-01", bearer(anna.key));
+    expect(r.status, r.text).toBe(200);
+    expect(r.body).toMatchObject({ batchId: "INV-2027-01-0", month: "2027-01", organizers: [], totals: { invoices: 0, netCents: 0, vatCents: 0, grossCents: 0 }, emailsSent: 0 });
   });
 
-  it("pins current behaviour — suspected bug: without ?month, a request clock outside the orders' month is a 500 (a junk clock cookie falls back to the wall clock)", async () => {
+  it("without ?month, a request clock outside the orders' month is that month's empty export; a junk clock cookie falls back to the wall clock", async () => {
     await venue(t.db, { id: "park", venue: "Budapest Park" });
     await order("park");
     const anna = await customer(auth, "Anna");
-    expect(await get("?event=park", bearer(anna.key), Date.UTC(2027, 5, 1))).toMatchObject({ status: 500, body: SERVER_ERROR });
+    const june = await get("?event=park", bearer(anna.key), Date.UTC(2027, 5, 1));
+    expect(june.status, june.text).toBe(200);
+    expect(june.body).toMatchObject({ month: "2027-06", totals: { invoices: 0 } });
     const junkClock = await call({ path: "/api/v1/organizer/invoices", headers: { ...bearer(anna.key), cookie: "tb-test-now=not-a-time" } });
-    expect(junkClock).toMatchObject({ status: 500, body: SERVER_ERROR });
+    expect(junkClock.status, junkClock.text).toBe(200);
+    const today = new Date(); // the default month is the server's local month
+    expect(junkClock.body.month).toBe(`${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}`);
   });
 
   it("pins current behaviour — suspected bug: a month that is not YYYY-MM is a 500", async () => {

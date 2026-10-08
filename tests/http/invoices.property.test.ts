@@ -131,26 +131,21 @@ const anyChar = fc.oneof(
 const anyString = fc.oneof({ withCrossShrink: true }, fc.string({ unit: anyChar }), fc.string({ unit: "grapheme" }), fc.string({ unit: anyChar, maxLength: 3000, size: "max" }));
 
 /**
- * Months with paid orders, in the spellings the export takes. Until the two
- * pinned crashes are fixed (invoices.test.ts: "a month with no paid orders is
- * a 500" and "a month that is not YYYY-MM is a 500") the generator sends only
- * these: another year, another month, month 00 or 13, a huge year, garbage,
- * and an empty month all end in a 500 today.
+ * Months, in the spellings the export takes. Until the pinned crash is fixed
+ * (invoices.test.ts: "a month that is not YYYY-MM is a 500") the generator
+ * sends only well-formed ones: month 00 or 13, a huge year and garbage all
+ * end in a 500 today.
  */
-const month = fc.constantFrom("2027-01", "2027-1", "2027-01-15");
+const month = fc.oneof(
+  { weight: 3, arbitrary: fc.constantFrom("2027-01", "2027-1", "2027-01-15", "2027-02", "2027-03") },
+  fc.tuple(fc.integer({ min: 1970, max: 2100 }), fc.integer({ min: 1, max: 12 })).map(([y, m]) => `${y}-${m}`),
+);
 
-/**
- * Events: the one with January orders, or ids the route refuses before the
- * export (404). Events without paid orders in the month ("beach", "refunds",
- * "empty", "no-such-event") are left out until "a month with no paid orders is
- * a 500" is fixed.
- */
-const EVENT_ID = /^[a-z0-9][a-z0-9-]{0,99}$/;
+/** Events: with January orders, with February orders, with refunded orders only, with none, unknown, malformed, or anything. */
 const event = fc.oneof(
-  { weight: 3, arbitrary: fc.constant("park") },
+  { weight: 3, arbitrary: fc.constantFrom("park", "beach", "refunds", "empty", "no-such-event") },
   fc.constantFrom("NOT AN ID", "", "park/../beach", "Park", "a".repeat(101), "-park"),
-  // a random string that is a well-formed id of no event ("a") is the same pinned 500 (the hunt found it at run 181)
-  anyString.filter((s) => s === "park" || !EVENT_ID.test(s)),
+  anyString,
 );
 
 /** Junk the query may also carry. */
@@ -187,21 +182,16 @@ interface ApiRequest {
 }
 
 const query: fc.Arbitrary<string> = fc.oneof(
-  // ?month is always sent until "without ?month, a request clock outside the
-  // orders' month is a 500" (invoices.test.ts) is fixed: the default month
-  // comes from the request clock, and the hunt found that on its first run.
-  { weight: 5, arbitrary: fc.record({ month, event: fc.option(event, { nil: undefined }), junk }).map(({ month, event, junk }) => {
+  { weight: 5, arbitrary: fc.record({ month: fc.option(month, { nil: undefined }), event: fc.option(event, { nil: undefined }), junk }).map(({ month, event, junk }) => {
     const p = new URLSearchParams();
-    p.set("month", month);
+    if (month !== undefined) p.set("month", month);
     if (event !== undefined) p.set("event", event);
     const q = p.toString() + junk;
     return q ? `?${q.replace(/^&/, "")}` : "";
   }) },
-  // The same two pins keep a bad escape out of ?month and a month on every raw
-  // query for now: "?month=%ZZ", "?event=%ZZ", "?%", "?#" and "??month=…" all
-  // reach the export with no month or a bad one.
-  { weight: 1, arbitrary: fc.tuple(fc.constantFrom("?month=2027-01&event=", "?month=2027-01&"), badEscape).map(([k, bad]) => `${k}${bad}`) },
-  { weight: 1, arbitrary: fc.constantFrom("?month=2027-01&month=banana", "?month=2027-01&event=park&event=NOT%20AN%20ID", "?month=2027-01&event=park&event=", "?month=2027-01#", "?month=2027-01&?month=banana") },
+  // A bad escape stays out of ?month itself until "a month that is not YYYY-MM is a 500" is fixed.
+  { weight: 1, arbitrary: fc.tuple(fc.constantFrom("?event=", "?month=2027-01&event=", "?"), badEscape).map(([k, bad]) => `${k}${bad}`) },
+  { weight: 1, arbitrary: fc.constantFrom("?month=2027-01&month=banana", "?event=park&event=NOT%20AN%20ID", "?month=2027-01&event=park&event=", "?#", "??month=2027-01") },
 );
 
 function describeRequest(r: ApiRequest): string {
