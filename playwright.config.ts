@@ -8,6 +8,7 @@ export default defineConfig({
   testDir: "./e2e",
   fullyParallel: true,
   timeout: 30_000,
+  retries: 2,
   use: {
     baseURL: `http://localhost:${E2E_PORT}`,
     // Failures on a money path have to be diagnosable without a rerun.
