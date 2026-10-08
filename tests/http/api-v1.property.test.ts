@@ -21,6 +21,17 @@
 //     at the payment provider (charges − refunds) equals what the live orders
 //     hold (totals − refunds); a reused Idempotency-Key never makes a second
 //     order. A failing sequence shrinks to its fewest steps.
+//  4. Never a 500, always JSON. Whatever a client sends under /api/v1 — any of
+//     the seven methods a route can answer, any path, any Authorization,
+//     Idempotency-Key, Content-Type or clock cookie, any body (a cart with
+//     each field mutated, any JSON, or bytes that are not JSON) — the status
+//     is below 500 and the body is JSON; an error (404 and 405 included) is
+//     {"error": "..."} with no stack trace and no SQL in it. Real keys (read,
+//     read & write, revoked, expired, banned owner), real events (open,
+//     early-bird, free, sold out, started, cancelled) and real orders (paid,
+//     refunded, free) sit behind the requests. Most requests are built for
+//     one endpoint — its method, a working key, a cart-shaped body — so they
+//     get past the checks at the door; the rest are any method on any path.
 //
 // The seed is fixed so a failure replays exactly; fast-check prints it with
 // the shrunk counterexample. FC_SEED=<n> explores a different stream.
@@ -30,10 +41,11 @@ import { like } from "drizzle-orm";
 import type { Auth } from "../../src/auth/auth";
 import { events, orders } from "../../src/db/schema";
 import { createFakeStripe, type PaymentProvider } from "../../src/payments";
-import { customer, makeAuth, scopedKey, useCleanAccounts, type Customer } from "../integration/accounts";
+import { cancelOrder, placeOrder } from "../../src/services/orders";
+import { ban, customer, expireKey, makeAuth, revokeKey, scopedKey, useCleanAccounts, type Customer } from "../integration/accounts";
 import { useTestDatabase } from "../integration/database";
 import { addCode, DAY, HOUR, NOW, venue } from "../integration/fixtures";
-import { bearer, call, loadRoutes, quietRefusedKeyLogs, type Call, type Reply } from "./client";
+import { BASE_URL, bearer, call, loadRoutes, quietRefusedKeyLogs, type Call, type Reply } from "./client";
 
 const wiring = vi.hoisted(() => ({ auth: undefined as unknown, db: undefined as unknown, payments: undefined as unknown }));
 vi.mock("@/lib/auth", () => ({ appBaseURL: () => "http://localhost:3000", getAuth: () => wiring.auth }));
@@ -484,6 +496,256 @@ describe("3. stateful sequences", () => {
         await fc.asyncModelRun(() => ({ model: { now: NOW, orders: [], keys: new Map() }, real }), cmds);
       }),
       runs(30),
+    );
+  }, 180_000);
+});
+
+// ---- 4. Never a 500, always JSON -------------------------------------------------
+
+/** Printable ASCII (0x20-0x7E): what a URL or an HTTP header value can carry. */
+const ascii = (c: { minLength?: number; maxLength?: number } = {}) => fc.string({ unit: "grapheme-ascii", ...c });
+
+/** The events behind the requests: one of each kind a rule can refuse or accept. */
+const EVENT_IDS = ["open-show", "early-show", "free-show", "pricey-show", "soon-show", "sold-out-show", "past-show", "cancelled-show"] as const;
+const CODES = ["WELCOME10", "FREE100", "EXPIRED", "USEDUP", "OFF"] as const;
+
+type Who = "anna" | "bela";
+type Auth1 = { kind: "none" } | { kind: "key"; who: Who; scope: "read" | "read-write"; slot: number } | { kind: "revoked" } | { kind: "expired" } | { kind: "banned" } | { kind: "raw"; value: string };
+
+interface AnyRequest {
+  method: string;
+  path: string;
+  auth: Auth1;
+  /** "fresh" = a never-used key; "reuse" = the key behind Anna's order #1 */
+  idem: string | undefined;
+  contentType: string | undefined;
+  body: string | undefined;
+  /** the test clock cookie; undefined = the wall clock; a string = a cookie that is not a number */
+  now: number | string | undefined;
+}
+
+const eventIdValue = fc.oneof(
+  { weight: 5, arbitrary: fc.constantFrom<unknown>(...EVENT_IDS) },
+  fc.constantFrom<unknown>("", "nope", "OPEN-SHOW", " open-show", "open-show ", "-x", "a".repeat(100), "a".repeat(101), "a/b", "ünï", "\u0000", "\ud800"),
+  ascii({ maxLength: 30 }),
+  fc.string({ maxLength: 10 }),
+  fc.constantFrom<unknown>(1, 0, -1, null, true, ["open-show"], { id: "open-show" }),
+);
+const ticketsValue = fc.oneof(
+  { weight: 5, arbitrary: fc.integer({ min: 1, max: 50 }) },
+  fc.integer({ min: -5, max: 60 }),
+  fc.constantFrom<unknown>(0, 51, 1.5, 2 ** 31, 2 ** 53, 1e308, -1e308, 1e-7, "2", "", null, true, [2], { n: 2 }),
+  fc.double({ noNaN: true, noDefaultInfinity: true }),
+);
+const codeValue = fc.oneof(
+  { weight: 3, arbitrary: fc.constantFrom<unknown>(...CODES) },
+  fc.constantFrom<unknown>("", " ", "welcome10", " WELCOME10 ", "NOPE", "a".repeat(40), "a".repeat(41), "FREE 100", "ü", "x'; DROP TABLE orders;--", null, 10, true, ["WELCOME10"]),
+  ascii({ maxLength: 20 }),
+);
+const cartBody = fc.record({ eventId: eventIdValue, tickets: ticketsValue, code: codeValue }, { requiredKeys: [] }).map((c) => JSON.stringify(c));
+
+const body = fc.oneof(
+  { weight: 5, arbitrary: cartBody },
+  { weight: 2, arbitrary: fc.jsonValue({ maxDepth: 3 }).map((v) => JSON.stringify(v)) },
+  { weight: 2, arbitrary: fc.oneof(ascii({ maxLength: 40 }), fc.string({ maxLength: 20 })) },
+  fc.constantFrom(
+    "",
+    "{",
+    "[",
+    "null",
+    "[]",
+    "2",
+    '"open-show"',
+    '{"__proto__":{"eventId":"open-show","tickets":2}}',
+    '{"eventId":"open-show","tickets":2,"extra":"x"}',
+    '{"eventId":"open-show","tickets":2,"code":"FREE100"}',
+    '{"eventId":"free-show","tickets":1}',
+    `{"eventId":"open-show","tickets":2,"code":"${"x".repeat(50_000)}"}`,
+    "﻿{}",
+  ),
+  fc.constant(undefined),
+);
+
+const eventSeg = fc.oneof(
+  { weight: 4, arbitrary: fc.constantFrom<string>(...EVENT_IDS) },
+  fc.constantFrom("nope", "OPEN-SHOW", "open%2Dshow", "open-show%00", "%E0%A4%A", "..", ".", "a".repeat(2000), " ", "ü", "open-show?x=1", "open-show#f"),
+  ascii({ maxLength: 40 }),
+  fc.string({ maxLength: 12 }),
+);
+const orderSeg = fc.oneof(
+  { weight: 4, arbitrary: fc.integer({ min: 1, max: 12 }).map(String) },
+  fc.constantFrom("0", "00", "-1", "+1", "1.0", "1e3", "01", "2147483647", "2147483648", "4294967296", "9007199254740991", "9007199254740992", "1".repeat(400), "NaN", "Infinity", "abc", "", " 1", "1 ", "%31", "1%00"),
+  ascii({ maxLength: 20 }),
+);
+const structuredPath = fc.oneof(
+  fc.constant("/api/v1/events"),
+  eventSeg.map((s) => `/api/v1/events/${s}`),
+  fc.constant("/api/v1/quote"),
+  fc.constant("/api/v1/orders"),
+  orderSeg.map((s) => `/api/v1/orders/${s}/cancel`),
+  orderSeg.map((s) => `/api/v1/orders/${s}`),
+);
+const randomPath = fc
+  .array(fc.oneof(fc.constantFrom("events", "orders", "quote", "cancel", "v1", "api", "..", ".", ""), ascii({ maxLength: 15 }), fc.string({ maxLength: 6 })), { maxLength: 5 })
+  .map((segs) => `/api/v1/${segs.join("/")}`);
+const path = fc
+  .tuple(fc.oneof({ weight: 3, arbitrary: structuredPath }, randomPath), fc.option(ascii({ maxLength: 30 }).map((q) => `?${q}`), { nil: "" }))
+  .map(([p, q]) => p + q)
+  // A path that normalises to outside /api/v1 ("/api/v1/..") is not this API's.
+  .filter((p) => {
+    const { pathname } = new URL(p, BASE_URL);
+    return pathname === "/api/v1" || pathname.startsWith("/api/v1/");
+  });
+
+const auth1: fc.Arbitrary<Auth1> = fc.oneof(
+  { weight: 3, arbitrary: fc.constant<Auth1>({ kind: "none" }) },
+  { weight: 6, arbitrary: fc.record({ kind: fc.constant("key" as const), who: fc.constantFrom<Who>("anna", "bela"), scope: fc.constantFrom<"read" | "read-write">("read", "read-write", "read-write"), slot: fc.nat(100) }) },
+  fc.constant<Auth1>({ kind: "revoked" }),
+  fc.constant<Auth1>({ kind: "expired" }),
+  fc.constant<Auth1>({ kind: "banned" }),
+  fc
+    .oneof(
+      fc.constantFrom("Bearer tb_nope", "Bearer", "Bearer ", "bearer tb_", "Bearer tb_", "Basic dXNlcjpwYXNz", `Bearer tb_${"x".repeat(5000)}`, "Bearer  tb_a  b", "Token tb_x", "Bearer tb_%00", ""),
+      ascii({ maxLength: 40 }),
+    )
+    .map<Auth1>((value) => ({ kind: "raw", value })),
+);
+
+const METHODS = ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"] as const;
+const idem = fc.oneof(
+  { weight: 3, arbitrary: fc.constant("fresh") },
+  fc.constant(undefined),
+  fc.constant("reuse"),
+  fc.constantFrom("", " ", "k1", "k1 ", "x".repeat(100), "x".repeat(101), "x".repeat(4000), "a b", "%00", '"quoted"'),
+  ascii({ maxLength: 120 }),
+);
+const contentType = fc.constantFrom(undefined, "application/json", "application/json; charset=utf-8", "text/plain", "application/x-www-form-urlencoded", "multipart/form-data; boundary=x", "application/octet-stream", "");
+const clock = fc.oneof(
+  { weight: 4, arbitrary: fc.integer({ min: NOW - 400 * DAY, max: NOW + 400 * DAY }) },
+  fc.constantFrom<number | string | undefined>(undefined, NOW, NOW + HOUR, NOW + 10 * DAY, "abc", "", "1e400", "-1"),
+);
+/** Mostly the method the endpoint answers; sometimes any other. */
+const methodOf = (right: (typeof METHODS)[number]) => fc.oneof({ weight: 6, arbitrary: fc.constant<string>(right) }, fc.constantFrom<string>(...METHODS));
+/** Mostly a read & write key, so a write endpoint gets past its auth check; sometimes anything. */
+const writeAuth: fc.Arbitrary<Auth1> = fc.oneof(
+  { weight: 5, arbitrary: fc.record({ kind: fc.constant("key" as const), who: fc.constantFrom<Who>("anna", "bela"), scope: fc.constant<"read-write">("read-write"), slot: fc.nat(100) }) },
+  auth1,
+);
+const withQuery = (p: fc.Arbitrary<string>) => fc.tuple(p, fc.option(ascii({ maxLength: 30 }).map((q) => `?${q}`), { nil: "" })).map(([a, b]) => a + b);
+
+/** A request aimed at one endpoint: the pieces that endpoint reads are mostly the kind it expects, so the request gets deep into it. */
+const shaped: fc.Arbitrary<AnyRequest> = fc.constantFrom("list", "event", "quote", "orders", "orders", "cancel", "cancel").chain((endpoint) => {
+  const common = { idem, contentType, now: clock, body };
+  switch (endpoint) {
+    case "list":
+      return fc.record({ ...common, method: methodOf("GET"), path: withQuery(fc.constant("/api/v1/events")), auth: auth1 });
+    case "event":
+      return fc.record({ ...common, method: methodOf("GET"), path: withQuery(eventSeg.map((s) => `/api/v1/events/${s}`)), auth: auth1 });
+    case "quote":
+      return fc.record({ ...common, method: methodOf("POST"), path: withQuery(fc.constant("/api/v1/quote")), auth: auth1 });
+    case "orders":
+      return fc.record({ ...common, method: methodOf("POST"), path: withQuery(fc.constant("/api/v1/orders")), auth: writeAuth });
+    default:
+      return fc.record({ ...common, method: methodOf("POST"), path: withQuery(orderSeg.map((s) => `/api/v1/orders/${s}/cancel`)), auth: writeAuth });
+  }
+});
+
+/** Any request at all: every piece independent of every other. */
+const random: fc.Arbitrary<AnyRequest> = fc.record({ method: fc.constantFrom<string>(...METHODS), path, auth: auth1, idem, contentType, body, now: clock });
+
+const anyRequest: fc.Arbitrary<AnyRequest> = fc
+  .oneof({ weight: 5, arbitrary: shaped }, { weight: 1, arbitrary: random })
+  .map((q) => {
+    const bodyShown = q.body === undefined ? "no body" : `body ${q.body.length > 120 ? `${q.body.slice(0, 120)}… (${q.body.length} chars)` : q.body}`;
+    return shown(q, `${q.method} ${q.path.length > 120 ? `${q.path.slice(0, 120)}… (${q.path.length} chars)` : q.path} | auth ${JSON.stringify(q.auth)} | idempotency-key ${JSON.stringify(q.idem)} | content-type ${JSON.stringify(q.contentType)} | ${bodyShown} | clock ${JSON.stringify(q.now)}`);
+  });
+
+describe("4. never a 500, always JSON", () => {
+  it("whatever request comes in under /api/v1, the status is below 500 and the body is JSON", async () => {
+    // People: Anna and Bela with a few keys each, Cili banned, plus one revoked and one expired key.
+    const anna = await customer(auth, "Anna");
+    const bela = await customer(auth, "Bela");
+    const cili = await customer(auth, "Cili");
+    await ban(t.db, cili.id);
+    const revoked = await customer(auth, "Dora");
+    await revokeKey(auth, revoked);
+    const expired = await scopedKey(auth, anna.id, "read-write");
+    await expireKey(t.db, expired.keyId);
+    const pool = async (c: Customer, scope: "read" | "read-write", n: number) => Promise.all(Array.from({ length: n }, () => scopedKey(auth, c.id, scope).then((k) => k.key)));
+    const keys: Record<Who, Record<"read" | "read-write", string[]>> = {
+      anna: { read: await pool(anna, "read", 2), "read-write": await pool(anna, "read-write", 6) },
+      bela: { read: await pool(bela, "read", 2), "read-write": await pool(bela, "read-write", 4) },
+    };
+
+    // Events: one of each kind.
+    await venue(t.db, { id: "open-show", startsAtMs: NOW + 10 * DAY });
+    await venue(t.db, { id: "early-show", startsAtMs: NOW + 45 * DAY, priceCents: 4999 });
+    await venue(t.db, { id: "free-show", startsAtMs: NOW + 10 * DAY, priceCents: 0 });
+    await venue(t.db, { id: "pricey-show", startsAtMs: NOW + 10 * DAY, priceCents: 100_000 });
+    await venue(t.db, { id: "soon-show", startsAtMs: NOW + HOUR });
+    await venue(t.db, { id: "sold-out-show", startsAtMs: NOW + 10 * DAY, totalSeats: 10, seatsSold: 10 });
+    await venue(t.db, { id: "past-show", startsAtMs: NOW - DAY });
+    await venue(t.db, { id: "cancelled-show", startsAtMs: NOW + 10 * DAY, cancelledAtMs: NOW - HOUR });
+    await addCode(t.db, "WELCOME10", 10);
+    await addCode(t.db, "FREE100", 100);
+    await addCode(t.db, "EXPIRED", 10, { expiresAtMs: NOW - HOUR });
+    await addCode(t.db, "USEDUP", 10, { maxUses: 1, uses: 1 });
+    await addCode(t.db, "OFF", 10, { active: false });
+
+    // Orders: paid, free, refunded, and one on an event that starts within the hour.
+    const deps = { db: t.db, payments, nowMs: NOW };
+    const place = (c: Customer, eventId: string, quantity: number, key: string, code?: string) =>
+      placeOrder(deps, { eventId, quantity, code, email: c.email, name: c.name, userId: c.id, idempotencyKey: key });
+    await place(anna, "open-show", 2, `api:${anna.id}:reuse`); // #1 — the "reuse" Idempotency-Key replays it for Anna
+    await place(anna, "free-show", 1, uniqueId("seed")); // #2
+    const refunded = await place(anna, "open-show", 1, uniqueId("seed")); // #3
+    await cancelOrder(deps, refunded.order.id);
+    await place(bela, "early-show", 3, uniqueId("seed"), "FREE100"); // #4 — 0 cents for the tickets
+    await place(anna, "soon-show", 1, uniqueId("seed")); // #5
+
+    const authorization = (a: Auth1): string | undefined => {
+      switch (a.kind) {
+        case "none":
+          return undefined;
+        case "key": {
+          const ks = keys[a.who][a.scope];
+          return `Bearer ${ks[a.slot % ks.length]}`;
+        }
+        case "revoked":
+          return `Bearer ${revoked.key}`;
+        case "expired":
+          return `Bearer ${expired.key}`;
+        case "banned":
+          return `Bearer ${cili.key}`;
+        case "raw":
+          return a.value;
+      }
+    };
+
+    await fc.assert(
+      fc.asyncProperty(anyRequest, async (q) => {
+        const headers: Record<string, string> = {};
+        const bearerValue = authorization(q.auth);
+        if (bearerValue !== undefined) headers.authorization = bearerValue;
+        if (q.idem !== undefined) headers["idempotency-key"] = q.idem === "fresh" ? uniqueId("p1") : q.idem;
+        if (q.contentType !== undefined) headers["content-type"] = q.contentType;
+        if (typeof q.now === "string") headers.cookie = `tb-test-now=${q.now}`;
+        // A GET or HEAD cannot carry a body (the Request constructor refuses one).
+        const rawBody = q.method === "GET" || q.method === "HEAD" ? undefined : q.body;
+        const r = await call({ method: q.method, path: q.path, headers, rawBody, nowMs: typeof q.now === "number" ? q.now : undefined });
+
+        const answer = `→ ${r.status} ${r.headers.get("content-type") ?? "(no content-type)"} ${r.text.slice(0, 300)}`;
+        expect(r.status, answer).toBeLessThan(500);
+        expect(r.headers.get("content-type") ?? "", answer).toMatch(/^application\/json\b/);
+        if (q.method === "HEAD") return; // a HEAD answer has the GET's status and headers, no body
+        expect(r.isJson, answer).toBe(true);
+        if (r.status >= 400) {
+          // An error is {"error": "..."} a person can read, with nothing internal in it.
+          expect(r.body, answer).toEqual({ error: expect.any(String) });
+          expect(r.body.error, answer).not.toMatch(/\n\s+at |Failed query|postgres|drizzle/i);
+        }
+      }),
+      runs(500),
     );
   }, 180_000);
 });

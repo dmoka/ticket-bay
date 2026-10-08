@@ -60,7 +60,7 @@ const CartBody = z.object({
 const IdempotencyKey = z.string().trim().min(1).max(100);
 
 /** Order ids are positive Postgres INTEGERs, written in decimal. */
-const OrderIdParam = z.string().regex(/^\d+$/);
+const OrderIdParam = z.string().regex(/^[1-9]\d{0,9}$/);
 
 async function readBody<T>(request: Request, schema: z.ZodType<T>): Promise<T> {
   let raw: unknown;
