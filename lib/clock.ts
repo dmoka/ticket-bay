@@ -9,10 +9,14 @@ import { cookies } from "next/headers";
  */
 export const TEST_CLOCK_COOKIE = "tb-test-now";
 
+/** The largest instant a Date can hold, in ms: ECMAScript time values run from -8.64e15 to 8.64e15. */
+const MAX_DATE_MS = 8.64e15;
+
 function testClock(raw: string | undefined): number | null {
   if (process.env.TICKETBAY_TEST_CLOCK !== "1") return null;
   const ms = raw === undefined ? NaN : Number(raw);
-  return Number.isFinite(ms) ? ms : null;
+  // A value a Date cannot hold counts as no cookie, like a value that is not a number: the wall clock answers.
+  return Number.isFinite(ms) && Math.abs(ms) <= MAX_DATE_MS ? ms : null;
 }
 
 export async function now(): Promise<number> {
