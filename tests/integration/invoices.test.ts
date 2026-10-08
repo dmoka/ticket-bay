@@ -393,6 +393,12 @@ describe("pins current behaviour — suspected bugs", () => {
     await expect(exportMonth()).rejects.toThrow(RangeError);
   });
 
+  it("suspected bug: an order of 1 or 2 cents (its VAT rounds to 0) throws RangeError while printing the copy — found by the invariant property", async () => {
+    await park();
+    await order("park", { subtotalCents: 1, ticketsCents: 1, feeCents: 100, totalCents: 101 });
+    await expect(exportMonth()).rejects.toThrow(RangeError);
+  });
+
   it("suspected bug: month 2027-13 exports January 2028 under the name 2027-13", async () => {
     await park();
     const o = await order("park", { createdAtMs: Date.UTC(2028, 0, 10) });

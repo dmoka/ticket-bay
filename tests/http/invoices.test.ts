@@ -129,6 +129,15 @@ describe("GET /api/v1/organizer/invoices", () => {
     expect(await get("?month=2027-01", bearer(anna.key))).toMatchObject({ status: 500, body: SERVER_ERROR });
   });
 
+  it("pins current behaviour — suspected bug: without ?month, a request clock outside the orders' month is a 500 (a junk clock cookie falls back to the wall clock)", async () => {
+    await venue(t.db, { id: "park", venue: "Budapest Park" });
+    await order("park");
+    const anna = await customer(auth, "Anna");
+    expect(await get("?event=park", bearer(anna.key), Date.UTC(2027, 5, 1))).toMatchObject({ status: 500, body: SERVER_ERROR });
+    const junkClock = await call({ path: "/api/v1/organizer/invoices", headers: { ...bearer(anna.key), cookie: "tb-test-now=not-a-time" } });
+    expect(junkClock).toMatchObject({ status: 500, body: SERVER_ERROR });
+  });
+
   it("pins current behaviour — suspected bug: a month that is not YYYY-MM is a 500", async () => {
     const anna = await customer(auth, "Anna");
     expect(await get("?month=banana", bearer(anna.key))).toMatchObject({ status: 500, body: SERVER_ERROR });
