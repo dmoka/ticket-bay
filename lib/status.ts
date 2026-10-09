@@ -3,12 +3,15 @@ import { earlyBirdApplies } from "@/src/domain/invoice";
 
 export type EventStatus = "cancelled" | "on-sale" | "early-bird" | "few-left" | "sold-out" | "past";
 
+/** "Few left" from this many seats down, whatever the size of the venue. */
+export const FEW_LEFT_SEATS = 20;
+
 export function eventStatus(ev: EventRow, nowMs: number): EventStatus {
   if (ev.cancelledAtMs !== null) return "cancelled";
   if (nowMs >= ev.startsAtMs) return "past";
   const left = ev.totalSeats - ev.seatsSold;
   if (left <= 0) return "sold-out";
-  if (left / ev.totalSeats <= 0.1) return "few-left";
+  if (left <= FEW_LEFT_SEATS) return "few-left";
   if (earlyBirdApplies({ startMs: ev.startsAtMs }, nowMs)) return "early-bird";
   return "on-sale";
 }
