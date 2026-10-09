@@ -306,9 +306,11 @@ export async function cancelOrder(deps: Deps, orderId: number): Promise<CancelRe
       throw new OrderError("This order has already been refunded.");
     }
     const preview = previewCancellation(toDomainOrder(found.order, found.event), nowMs);
+    // Store the gross refund: the admin refunds page and the payout export add
+    // `refundFeeCents` back on top of the net, so they always read gross.
     const won = await markRefunded(tx, orderId, {
       atMs: nowMs,
-      refundCents: preview.netCents,
+      refundCents: preview.grossCents,
       refundFeeCents: preview.feeCents,
       seatsReleased: preview.releasesSeats,
     });
@@ -316,7 +318,7 @@ export async function cancelOrder(deps: Deps, orderId: number): Promise<CancelRe
     if (preview.releasesSeats) await adjustSeatsSold(tx, found.order.eventId, -found.order.quantity);
     return {
       paymentId: found.order.paymentId,
-      resume: { refundCents: preview.netCents, refundFeeCents: preview.feeCents, seatsReleased: preview.releasesSeats },
+      resume: { refundCents: preview.grossCents, refundFeeCents: preview.feeCents, seatsReleased: preview.releasesSeats },
     };
   }));
 
