@@ -5,7 +5,7 @@
 // is no one to authenticate — the MCP spec says stdio servers take any
 // credentials from the environment, and these tools need none.
 //
-//   claude mcp add ticketbay-local -- npx tsx /path/to/ticket-bay-v2/mcp/server.ts
+//   claude mcp add ticketbay-local -- npx tsx "$PWD/mcp/server.ts"
 //
 // stdout belongs to the protocol: never console.log here (use console.error).
 import path from "node:path";
