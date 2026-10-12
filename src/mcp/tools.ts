@@ -396,10 +396,10 @@ export function createTicketBayServer(deps: ToolDeps, caller: Caller, opts: { in
     {
       title: "Refund an order",
       description:
-        "Cancel one of the customer's own orders and refund it NOW, by TicketBay's refund rules (refund fee kept; nothing back once the event has started). " +
+        `Cancel one of the customer's own orders and refund up to €${eur(AGENT_REFUND_LIMIT_CENTS)}, by TicketBay's refund rules (refund fee kept; nothing back once the event has started). ` +
         "Cannot be undone. Tell the customer the refund amount from my_orders and get an explicit yes first. " +
-        `Refunds up to €${eur(AGENT_REFUND_LIMIT_CENTS)} by itself and returns the refund and a link to the order page. ` +
-        "A bigger refund is NOT made: the tool returns the order page link instead, and the customer clicks Cancel order there themselves. Give them the link. " +
+        `A refund of €${eur(AGENT_REFUND_LIMIT_CENTS)} or less: the tool cancels the order and returns the refund and a link to the order page. ` +
+        `A refund over €${eur(AGENT_REFUND_LIMIT_CENTS)}: the tool changes nothing and returns the order page link. Give the customer the link; they click Cancel order on that page. ` +
         "Requires a read & write API key.",
       inputSchema: z.object({ order_id: orderIdInput }),
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: false },
