@@ -91,7 +91,7 @@ curl -X POST localhost:3000/api/v1/orders -H 'content-type: application/json' \
 curl -X POST localhost:3000/api/v1/orders/42/cancel -H "Authorization: Bearer $TICKETBAY_API_KEY"
 ```
 
-`tests/http/` tests it through the proxy and the route handlers with real `Request`s against a real Postgres: the happy paths and auth, plus four HTTP-level properties (fast-check, fixed seed, `FC_SEED=<n>` to explore):
+`tests/http/` tests it through the proxy and the route handlers with real `Request`s against a real Postgres: the happy paths and auth, plus four HTTP-level properties (fast-check, a random seed per run, `FC_SEED=<n>` to replay a failure):
 
 1. **Robustness:** any method, path, Content-Type, Accept, body and Authorization → a status below 500 and a JSON body.
 2. **Valid input → success:** every valid order is a `201` with the right price, bookings at the early-bird boundary included.

@@ -30,8 +30,9 @@
 //     hold (totals − refunds); a reused Idempotency-Key never makes a second
 //     order. A failing sequence shrinks to its fewest steps.
 //
-// The seed is fixed so a failure replays exactly; fast-check prints it with
-// the shrunk counterexample. FC_SEED=<n> explores a different stream.
+// Every run picks a new random seed, so every run tries different requests.
+// A failure prints its seed next to the shrunk counterexample; FC_SEED=<n>
+// replays that exact run.
 import { describe, it, expect, vi, beforeAll, afterAll, beforeEach } from "vitest";
 import fc from "fast-check";
 import { like } from "drizzle-orm";
@@ -55,7 +56,7 @@ const t = useTestDatabase();
 useCleanAccounts(t);
 quietRefusedKeyLogs();
 
-const SEED = Number(process.env.FC_SEED ?? 20261004);
+const SEED = Number(process.env.FC_SEED ?? Math.floor(Math.random() * 2 ** 31));
 const runs = (numRuns: number) => ({ seed: SEED, numRuns });
 
 /**
