@@ -112,11 +112,11 @@ In the box (no Docker there), the same tests run against the box's own Postgres 
 | `npm run test:unit` | The same minus the integration tests — no Docker needed |
 | `npm run test:integration` | Only the Postgres integration tests |
 | `npm run test:http` | The REST API through its route handlers: integration tests and HTTP-level property tests (Postgres) |
-
-The Postgres lanes start a container with Testcontainers. Without Docker (inside `./box`), or with `TICKETBAY_TEST_DB=external`, they use the Postgres at `DATABASE_URL` instead: each run creates a template database and one database per test file there, and drops them when it ends. The database `DATABASE_URL` names is never touched.
 | `npm run test:ui` | Playwright: the critical money paths against a production build and its own Postgres container |
 | `npm run test:mutation` | Stryker on `src/domain` (unit lane) |
 | `npm run typecheck` / `npm run build` | `tsc --noEmit` / production build |
+
+The Postgres lanes start a container with Testcontainers. Without Docker (inside `./box`), or with `TICKETBAY_TEST_DB=external`, they use the Postgres at `DATABASE_URL` instead: each run creates a template database and one database per test file there, and drops them when it ends. The database `DATABASE_URL` names is never touched.
 
 **Test with real databases.** The integration lane never mocks the database. `tests/integration/global-setup.ts` starts one throwaway Postgres container per run and migrates a template database. Each test file clones its own database from that template, and every test starts from empty tables (`TRUNCATE`). The race tests open two real connections that commit and block on each other's row locks — which is why isolation is by truncation and not by a rolled-back transaction around each test.
 
