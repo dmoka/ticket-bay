@@ -746,7 +746,7 @@ describe("4. never a 500, always JSON", () => {
           expect(r.body.error, answer).not.toMatch(/\n\s+at |Failed query|postgres|drizzle/i);
         }
       }),
-      runs(500),
+      runs(2000),
     );
   }, 180_000);
 });
