@@ -19,7 +19,7 @@ import { seatsAvailable } from "../domain/booking";
 import { earlyBirdEndsMs, type Invoice } from "../domain/invoice";
 import { resolveCaller } from "../mcp/caller";
 import { PaymentError, type PaymentProvider } from "../payments";
-import { cancelOwnOrder, OrderError, placeOrder, quoteOrder } from "../services/orders";
+import { cancelOrder, cancelOwnOrder, OrderError, placeOrder, quoteOrder } from "../services/orders";
 
 export interface ApiDeps {
   db: Db;
@@ -82,7 +82,7 @@ async function readBody<T>(request: Request, schema: z.ZodType<T>): Promise<T> {
 const API_REALM = 'Bearer realm="TicketBay API"';
 
 /** The account behind the request's API key, if the key may write. */
-async function writer(deps: ApiDeps, request: Request): Promise<{ userId: string; email: string; name: string }> {
+async function writer(deps: ApiDeps, request: Request): Promise<{ userId: string; email: string; name: string; role: string | null }> {
   const resolved = await resolveCaller({ auth: deps.auth(), db: deps.db }, request);
   if (!resolved.ok) throw new ApiError(401, resolved.error, { "WWW-Authenticate": API_REALM });
   const caller = resolved.caller;
@@ -235,13 +235,18 @@ export function placeOrderEndpoint(deps: ApiDeps, request: Request): Promise<Res
   });
 }
 
-/** POST /api/v1/orders/{id}/cancel — cancels one of the caller's own orders and refunds it by the refund rules. */
+/**
+ * POST /api/v1/orders/{id}/cancel — cancels one of the caller's own orders and
+ * refunds it by the refund rules. An admin's key may cancel any order, so
+ * support can act on a customer's behalf from a script.
+ */
 export function cancelOrderEndpoint(deps: ApiDeps, request: Request, id: string): Promise<Response> {
   return handle(request, async () => {
     const caller = await writer(deps, request);
     // An id that cannot name an order is simply not found — the same answer as someone else's order.
     if (!OrderIdParam.safeParse(id).success) throw new ApiError(404, "Order not found.");
-    const r = await cancelOwnOrder({ db: deps.db, payments: deps.payments, nowMs: deps.now(request) }, caller.userId, Number(id));
+    const orderDeps = { db: deps.db, payments: deps.payments, nowMs: deps.now(request) };
+    const r = caller.role === "admin" ? await cancelOrder(orderDeps, Number(id)) : await cancelOwnOrder(orderDeps, caller.userId, Number(id));
     return Response.json({
       refund: { refundCents: r.refundCents, refundFeeCents: r.refundFeeCents, seatsReleased: r.seatsReleased },
       order: orderJson(r.order),
