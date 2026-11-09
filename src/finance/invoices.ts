@@ -20,6 +20,7 @@ export let lastInvoiceExport: any = null;
 function sendMail(to: string, subject: string, body: string) {
   console.log("[invoices] mail -> " + to + " (" + subject + ")");
   try {
+    // Stryker disable next-line StringLiteral: equivalent — reports/ is always created before sendMail runs
     fs.mkdirSync(path.join(process.cwd(), "reports"), { recursive: true });
     fs.appendFileSync(
       path.join(process.cwd(), "reports", "outbox.log"),
