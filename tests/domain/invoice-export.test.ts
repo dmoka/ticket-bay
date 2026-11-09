@@ -47,6 +47,13 @@ describe("invoice lines: net, VAT 27% and gross", () => {
     expect(line).toMatchObject({ grossCents: 12700, vatCents: 2700, netCents: 10000 });
   });
 
+  it("pins current behaviour — suspected bug: on a very large order the VAT is a cent off (floating point, found by the invariant properties)", () => {
+    // 27/127 of 41 382 722 064 805 cents is 8 797 901 541 336.496…, which rounds to …336; the export says …337.
+    // The booking path accepts ticket amounts up to Number.MAX_SAFE_INTEGER.
+    const [line] = exportOf([row({ tickets_cents: "41382722064805" })]).result.organizers[0].lines;
+    expect(line).toMatchObject({ vatCents: 8797901541337, netCents: 32584820523468 });
+  });
+
   it("invoices the tickets only: gross is tickets_cents whatever the subtotal and discount", () => {
     const [line] = exportOf([row({ subtotal_cents: "20000", discount_cents: "5000", tickets_cents: "15000" })]).result.organizers[0].lines;
     expect(line.grossCents).toBe(15000);
@@ -273,6 +280,11 @@ describe("the printable copy", () => {
     const txt = exportOf([row({ tickets_cents: "123456789" })]).txt;
     const line = txt.split("\n").find((l) => l.startsWith("TB-202610"))!;
     expect(line.slice(59)).toBe("   972100.70   262467.19  1234567.89");
+  });
+
+  it("pins current behaviour — suspected bug: a newline in a customer name splits the invoice row in two", () => {
+    const txt = exportOf([row({ customer_name: "Anna\nKovács" })]).txt;
+    expect(txt).toContain("TB-202610-000001    TB-00007  Anna\nKovács             2 ");
   });
 
   it("pins current behaviour — suspected bug: an amount under €1 is printed one character too far right", () => {
