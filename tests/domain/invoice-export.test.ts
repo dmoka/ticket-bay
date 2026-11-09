@@ -202,6 +202,11 @@ describe("invoiceMonth", () => {
     expect(invoiceMonth("2026-12").end).toEqual(new Date("2027-01-01T00:00:00.000Z"));
   });
 
+  it("pins current behaviour — suspected bug: a year below 100 means 19xx (0099-10 is October 1999)", () => {
+    expect(invoiceMonth("0099-10").start).toEqual(new Date("1999-10-01T00:00:00.000Z"));
+    expect(invoiceMonth("26-10").start).toEqual(new Date("1926-10-01T00:00:00.000Z"));
+  });
+
   it("accepts a month without the leading zero", () => {
     expect(invoiceMonth("2026-1").start).toEqual(new Date("2026-01-01T00:00:00.000Z"));
   });
@@ -305,6 +310,27 @@ describe("pinned crashes", () => {
 
   it("pins current behaviour — suspected bug: a €0 order (100% discount) makes the whole export throw", () => {
     expect(() => exportOf([row({ tickets_cents: "0", discount_cents: "13000" })])).toThrow(RangeError);
+  });
+
+  it("pins current behaviour — suspected bug: a 1 or 2 cent order makes the whole export throw (its VAT rounds to 0, found by the crash hunt)", () => {
+    expect(() => exportOf([row({ tickets_cents: "1" })])).toThrow(RangeError);
+    expect(() => exportOf([row({ tickets_cents: "2" })])).toThrow(RangeError);
+    expect(() => exportOf([row({ tickets_cents: "3" })])).not.toThrow();
+  });
+
+  it("pins current behaviour — suspected bug: a venue named like an Object method (toString, valueOf, …) makes the export throw (found by the crash hunt)", () => {
+    for (const venue of ["toString", "valueOf", "hasOwnProperty", "isPrototypeOf", "propertyIsEnumerable", "toLocaleString", "__defineGetter__"]) {
+      expect(() => exportOf([row({ venue })]), venue).toThrow(TypeError);
+    }
+  });
+
+  it("pins current behaviour — suspected bug: a venue named __proto__ or constructor is invoiced to organizer undefined / Object, with no email", () => {
+    const proto = exportOf([row({ venue: "__proto__" })]);
+    expect(proto.result.organizers[0]).toMatchObject({ organizer: undefined, email: undefined, taxNo: undefined });
+    expect(csvLines(proto.csv)[0]).toContain(",undefined,undefined,");
+    expect(proto.mails[0].to).toBeUndefined();
+    const ctor = exportOf([row({ venue: "constructor" })]);
+    expect(ctor.result.organizers[0]).toMatchObject({ organizer: "Object", email: undefined });
   });
 
   it("pins current behaviour — suspected bug: an order with a 0 subtotal gets discount percent NaN (null in the JSON, NaN in the CSV)", () => {
