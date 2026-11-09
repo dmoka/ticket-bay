@@ -272,6 +272,14 @@ describe("the printable copy", () => {
     );
   });
 
+  it("prints a customer name that fills the 24-character column in full, and cuts one longer with …", () => {
+    const fits = "X".repeat(24);
+    const fitsTxt = exportOf([row({ customer_name: fits })]).txt;
+    expect(fitsTxt).toContain("TB-00007  " + fits + "2    ");
+    const longTxt = exportOf([row({ customer_name: fits + "Y" })]).txt;
+    expect(longTxt).toContain("TB-00007  " + "X".repeat(23) + "…2    ");
+  });
+
   it("prints the month as it was asked for", () => {
     expect(exportOf([row()], "2026-3").txt.split("\n")[0]).toBe("TICKETBAY - ORGANIZER INVOICES 2026-3");
   });

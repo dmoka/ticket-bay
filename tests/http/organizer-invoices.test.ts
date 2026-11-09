@@ -6,8 +6,9 @@
 // The export writes reports/invoices-<month>.csv/.txt and appends to
 // reports/outbox.log (gitignored), and its running invoice number lives in
 // the module for the whole file, so the tests compare numbers, not absolutes.
-import { describe, it, expect, vi, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, vi, beforeAll, afterAll, type MockInstance } from "vitest";
 import fs from "fs";
+import os from "os";
 import path from "path";
 import type { Auth } from "../../src/auth/auth";
 import { orders } from "../../src/db/schema";
@@ -30,6 +31,7 @@ useCleanAccounts(t);
 quietRefusedKeyLogs();
 
 let auth: Auth;
+let log: MockInstance<typeof console.log>;
 
 beforeAll(async () => {
   process.env.TICKETBAY_TEST_CLOCK = "1";
@@ -37,7 +39,7 @@ beforeAll(async () => {
   wiring.auth = auth;
   wiring.db = t.db;
   wiring.payments = createFakeStripe("sk_test_integration");
-  vi.spyOn(console, "log").mockImplementation(() => {});
+  log = vi.spyOn(console, "log").mockImplementation(() => {});
   await loadRoutes();
 });
 
@@ -179,6 +181,60 @@ describe("GET /api/v1/organizer/invoices — what it writes", () => {
     expect(sent).toContain("To: settlements@domearena.example\n");
   });
 
+  it("each mail is one outbox entry: To, Subject, Date, a blank line, the body, a ----- separator", async () => {
+    const ev = await venue(t.db, { id: "a38-night", venue: "A38 Ship" });
+    await paidOrder(ev.id);
+    const outbox = path.join(process.cwd(), "reports", "outbox.log");
+    const before = fs.existsSync(outbox) ? fs.readFileSync(outbox, "utf8").length : 0;
+    const r = await invoices("?month=2026-10", await keyHolder());
+    const entry = fs.readFileSync(outbox, "utf8").slice(before);
+    expect(entry).toMatch(
+      new RegExp(
+        "^To: finance@danubestage\\.example\\nSubject: TicketBay invoices 2026-10 \\(" + r.body.batchId + "\\)\\n" +
+          "Date: \\w{3}, \\d{2} \\w{3} \\d{4} \\d{2}:\\d{2}:\\d{2} GMT\\n\\nDear Danube Stage Kft\\.,\\n[\\s\\S]*\\nTicketBay Finance\\n\\n-----\\n$",
+      ),
+    );
+  });
+
+  it("logs the export, the paid order count, the files written and every mail", async () => {
+    const ev = await venue(t.db, { id: "a38-night", venue: "A38 Ship" });
+    await paidOrder(ev.id);
+    await paidOrder(ev.id);
+    const key = await keyHolder();
+    log.mockClear();
+    const r = await invoices("?month=2026-10&event=a38-night", key);
+    const csv = path.join(process.cwd(), "reports", "invoices-2026-10.csv");
+    const txt = path.join(process.cwd(), "reports", "invoices-2026-10.txt");
+    expect(log.mock.calls.map((c) => c.join(" "))).toEqual([
+      "[invoices] export 2026-10 (2026-10-01T00:00:00.000Z - 2026-11-01T00:00:00.000Z) event=a38-night",
+      "[invoices] 2 paid orders",
+      `[invoices] wrote ${csv} and ${txt}`,
+      `[invoices] mail -> finance@danubestage.example (TicketBay invoices 2026-10 (${r.body.batchId}))`,
+    ]);
+  });
+
+  it("an outbox it cannot write is logged and the export still succeeds", async () => {
+    const ev = await venue(t.db, { id: "a38-night", venue: "A38 Ship" });
+    await paidOrder(ev.id);
+    const key = await keyHolder();
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ticketbay-outbox-"));
+    // a directory where the outbox file should be: appending to it fails
+    fs.mkdirSync(path.join(dir, "reports", "outbox.log"), { recursive: true });
+    const cwd = vi.spyOn(process, "cwd").mockReturnValue(dir);
+    try {
+      log.mockClear();
+      const r = await invoices("?month=2026-10", key);
+      expect(r.status, r.text).toBe(200);
+      expect(r.body.emailsSent).toBe(1);
+      expect(fs.existsSync(path.join(dir, "reports", "invoices-2026-10.csv"))).toBe(true);
+      const failure = log.mock.calls.find((c) => c[0] === "[invoices] could not write outbox");
+      expect(failure?.[1]).toMatchObject({ code: "EISDIR" });
+    } finally {
+      cwd.mockRestore();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("pins current behaviour — suspected bug: every GET issues new invoice numbers for the same orders and mails again", async () => {
     const ev = await venue(t.db, { id: "a38-night", venue: "A38 Ship" });
     await paidOrder(ev.id);
@@ -187,6 +243,7 @@ describe("GET /api/v1/organizer/invoices — what it writes", () => {
     const first = await invoices("?month=2026-10", key);
     const second = await invoices("?month=2026-10", key);
     expect(second.body.emailsSent).toBe(1);
+    for (const no of [...numbers(first.body), ...numbers(second.body)]) expect(no).toMatch(/^TB-202610-\d{6}$/);
     const [a, b] = numbers(first.body).map(seqOf);
     const [c, d] = numbers(second.body).map(seqOf);
     expect(b).toBe(a! + 1);
