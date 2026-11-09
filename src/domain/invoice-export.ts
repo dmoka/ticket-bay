@@ -80,14 +80,24 @@ const ORGANIZERS: Record<string, Organizer> = {
 };
 
 function organizerFor(venue: string): Organizer {
-  return ORGANIZERS[venue] || { name: venue, email: "invoices@ticketbay.example", taxNo: "" };
+  // own keys only: a venue called "toString" is not on the list
+  if (Object.hasOwn(ORGANIZERS, venue)) return ORGANIZERS[venue]!;
+  return { name: venue, email: "invoices@ticketbay.example", taxNo: "" };
 }
 
-/** The UTC month `month` ("YYYY-MM") names: [start, end). */
+const MONTH = /^([1-9]\d{3})-(0?[1-9]|1[0-2])$/;
+
+/** "YYYY-MM" (the month's leading zero optional), a year from 1000 to 9999. */
+export function isInvoiceMonth(month: string): boolean {
+  return MONTH.test(month);
+}
+
+/** The UTC month `month` ("YYYY-MM") names: [start, end). A RangeError for anything else. */
 export function invoiceMonth(month: string): { start: Date; end: Date } {
-  const parts = month.split("-");
-  const y = parseInt(parts[0]!);
-  const m = parseInt(parts[1]!);
+  const match = MONTH.exec(month);
+  if (!match) throw new RangeError("month must be YYYY-MM, e.g. 2026-10");
+  const y = Number(match[1]);
+  const m = Number(match[2]);
   return { start: new Date(Date.UTC(y, m - 1, 1)), end: new Date(Date.UTC(y, m, 1)) };
 }
 
@@ -129,10 +139,7 @@ const euros = (cents: number) => (cents / 100).toFixed(2);
 
 // right-align an amount in a fixed-width column of the printable invoice
 function col(cents: number, width = 12) {
-  const eur = cents / 100;
-  const digits = Math.floor(Math.log10(eur)) + 1;
-  const pad = Math.max(width - digits - 3, 0);
-  return " ".repeat(pad) + eur.toFixed(2);
+  return euros(cents).padStart(width);
 }
 
 function left(s: string, width: number) {
@@ -200,19 +207,20 @@ function mailOf(month: string, batchId: string, g: OrganizerInvoices) {
 export function buildInvoiceExport({ rows, month, now, nextInvoiceSeq }: InvoiceExportInput) {
   const monthKey = invoiceMonth(month).start.toISOString().substring(0, 7);
 
-  // batch id: the month plus the first order in it, so finance can tell exports apart
-  const batchId = "INV-" + monthKey + "-" + rows[0]!.id;
+  // batch id: the month plus the first order in it (0: none), so finance can tell exports apart
+  const batchId = "INV-" + monthKey + "-" + (rows.length > 0 ? rows[0]!.id : 0);
 
-  // a plain object keyed by organizer name, groups in the order they first appear
-  const byName: Record<string, OrganizerInvoices> = {};
+  // groups in the order their organizer first appears
+  const byName = new Map<string, OrganizerInvoices>();
   const groups: OrganizerInvoices[] = [];
   const totals: Amounts = { netCents: 0, vatCents: 0, grossCents: 0 };
 
   for (const o of rows) {
     const org = organizerFor(o.venue);
-    let g = byName[org.name];
+    let g = byName.get(org.name);
     if (!g) {
-      g = byName[org.name] = { organizer: org.name, email: org.email, taxNo: org.taxNo, lines: [], netCents: 0, vatCents: 0, grossCents: 0 };
+      g = { organizer: org.name, email: org.email, taxNo: org.taxNo, lines: [], netCents: 0, vatCents: 0, grossCents: 0 };
+      byName.set(org.name, g);
       groups.push(g);
     }
     const line = invoiceLine(o, "TB-" + monthKey.replace("-", "") + "-" + String(nextInvoiceSeq()).padStart(6, "0"));

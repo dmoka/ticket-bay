@@ -1,7 +1,8 @@
 // GET /api/v1/organizer/invoices end to end: real Requests into the route
-// handler, real Better Auth API keys, real Postgres (Testcontainers). Pins what
-// the endpoint does today — which orders it invoices, who may read it, what it
-// writes — suspected bugs included ("pins current behaviour — suspected bug: …").
+// handler, real Better Auth API keys, real Postgres (Testcontainers): which
+// orders it invoices, who may read it (TicketBay admins), what it writes, how
+// it answers a bad query. Tests named "pins current behaviour — suspected bug: …"
+// pin a known problem that is not fixed yet.
 //
 // The export writes reports/invoices-<month>.csv/.txt and appends to
 // reports/outbox.log (gitignored), and its running invoice number lives in
@@ -13,7 +14,7 @@ import path from "path";
 import type { Auth } from "../../src/auth/auth";
 import { orders } from "../../src/db/schema";
 import { createFakeStripe } from "../../src/payments";
-import { customer, makeAuth, scopedKey, useCleanAccounts } from "../integration/accounts";
+import { customer, makeAdmin, makeAuth, scopedKey, useCleanAccounts } from "../integration/accounts";
 import { useTestDatabase } from "../integration/database";
 import { NOW, venue } from "../integration/fixtures";
 import { bearer, call, loadRoutes, quietRefusedKeyLogs } from "./client";
@@ -76,8 +77,10 @@ async function paidOrder(eventId: string, over: Partial<typeof orders.$inferInse
   return o!;
 }
 
-async function keyHolder(scope: "read" | "read-write" = "read-write") {
+/** An API key of a TicketBay admin (the default) or of a plain customer. */
+async function keyHolder(scope: "read" | "read-write" = "read-write", { admin = true } = {}) {
   const c = await customer(auth);
+  if (admin) await makeAdmin(t.db, c.id);
   if (scope === "read-write") return c.key;
   return (await scopedKey(auth, c.id, "read")).key;
 }
@@ -97,17 +100,31 @@ describe("GET /api/v1/organizer/invoices — who may call it", () => {
     expect(r.body.error).toMatch(/API key/);
   });
 
-  it("an unknown key: 401", async () => {
+  it("an unknown key: 401 saying the key does not work, with a WWW-Authenticate header", async () => {
     const r = await invoices("?month=2026-10", "tb_not_a_real_key");
     expect(r.status).toBe(401);
+    expect(r.headers.get("www-authenticate")).toBe('Bearer realm="TicketBay API"');
+    expect(r.body.error).toMatch(/^This API key does not work \(.+\)\. Create a new one under Settings → Developers\.$/);
   });
 
-  it("pins current behaviour — suspected bug: any customer's read-only key reads every organizer's invoices, other customers' names and emails included", async () => {
+  it("a customer's key, read-only or read-write: 403, nothing written", async () => {
     const ev = await venue(t.db, { id: "a38-night", venue: "A38 Ship" });
     await paidOrder(ev.id, { customerName: "Somebody Else", customerEmail: "somebody@else.example" });
+    for (const scope of ["read", "read-write"] as const) {
+      log.mockClear();
+      const r = await invoices("?month=2026-10", await keyHolder(scope, { admin: false }));
+      expect(r.status, scope).toBe(403);
+      expect(r.body).toEqual({ error: "The organizer reports are for TicketBay admins only." });
+      expect(r.text).not.toContain("Somebody Else");
+      expect(log).not.toHaveBeenCalled();
+    }
+  });
+
+  it("an admin's read-only key reads the export", async () => {
+    const ev = await venue(t.db, { id: "a38-night", venue: "A38 Ship" });
+    await paidOrder(ev.id);
     const r = await invoices("?month=2026-10", await keyHolder("read"));
-    expect(r.status).toBe(200);
-    expect(r.body.organizers[0].lines[0]).toMatchObject({ customer: "Somebody Else", customerEmail: "somebody@else.example" });
+    expect(r.status, r.text).toBe(200);
   });
 });
 
@@ -276,40 +293,49 @@ describe("GET /api/v1/organizer/invoices — the query", () => {
     expect(r.body.month).toBe(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`);
   });
 
-  it("pins current behaviour — suspected bug: a month with no paid orders is a 500, not an empty export", async () => {
+  it("a month with no paid orders is an empty export: no organizers, zero totals, a header-only CSV, no mails", async () => {
     const r = await invoices("?month=2026-10", await keyHolder());
-    expect(r.status).toBe(500);
-    expect(r.body).toEqual({ error: "Something went wrong on our side. Try again later." });
+    expect(r.status, r.text).toBe(200);
+    expect(r.body).toMatchObject({
+      batchId: "INV-2026-10-0",
+      organizers: [],
+      totals: { invoices: 0, netCents: 0, vatCents: 0, grossCents: 0 },
+      files: ["reports/invoices-2026-10.csv", "reports/invoices-2026-10.txt"],
+      emailsSent: 0,
+    });
+    expect(fs.readFileSync(path.join(process.cwd(), r.body.files[0]), "utf8").trimEnd().split("\n")).toHaveLength(1);
   });
 
-  it("pins current behaviour — suspected bug: an unknown (but well-formed) event id is a 500, not a 404", async () => {
+  it("an event id that is well formed but of no event: 404", async () => {
     const ev = await venue(t.db, { id: "dome-show", venue: "MVM Dome" });
     await paidOrder(ev.id);
     const r = await invoices("?month=2026-10&event=no-such-event", await keyHolder());
-    expect(r.status).toBe(500);
+    expect(r.status).toBe(404);
+    expect(r.body).toEqual({ error: "Event not found." });
   });
 
-  it("pins current behaviour — suspected bug: a month that is not YYYY-MM is a 500, not a 400", async () => {
+  it("an existing event without paid orders in the month is an empty export", async () => {
+    await venue(t.db, { id: "dome-show", venue: "MVM Dome" });
+    const r = await invoices("?month=2026-10&event=dome-show", await keyHolder());
+    expect(r.status, r.text).toBe(200);
+    expect(r.body.totals.invoices).toBe(0);
+  });
+
+  it("a month that is not YYYY-MM: 400, saying what a month looks like", async () => {
     const key = await keyHolder();
-    for (const month of ["abc", "2026", "2026-xx"]) {
+    for (const month of ["abc", "2026", "2026-xx", "2026-13", "2026-0", "0099-10", "2026-10x", ""]) {
       const r = await invoices(`?month=${month}`, key);
-      expect(r.status, month).toBe(500);
+      expect(r.status, month).toBe(400);
+      expect(r.body, month).toEqual({ error: "month: must be YYYY-MM, e.g. 2026-10." });
     }
   });
 
-  it("pins current behaviour — suspected bug: month 13 exports January of the next year", async () => {
-    const ev = await venue(t.db, { id: "dome-show", venue: "MVM Dome" });
-    const o = await paidOrder(ev.id, { createdAtMs: Date.UTC(2027, 0, 10) });
-    const r = await invoices("?month=2026-13", await keyHolder());
-    expect(r.body.month).toBe("2027-01");
-    expect(lineIds(r.body)).toEqual([o.id]);
-  });
-
-  it("pins current behaviour — suspected bug: one €0 order (100% discount) in the month makes the whole export a 500", async () => {
+  it("a €0 order (100% discount) is invoiced at 0, next to the others", async () => {
     const ev = await venue(t.db, { id: "dome-show", venue: "MVM Dome" });
     await paidOrder(ev.id);
-    await paidOrder(ev.id, { ticketsCents: 0, discountCents: 13000, discountPercent: 100, feeCents: 100, totalCents: 100 });
+    const free = await paidOrder(ev.id, { ticketsCents: 0, discountCents: 13000, discountPercent: 100, feeCents: 100, totalCents: 100 });
     const r = await invoices("?month=2026-10", await keyHolder());
-    expect(r.status).toBe(500);
+    expect(r.status, r.text).toBe(200);
+    expect(r.body.organizers[0].lines.find((l: { orderId: number }) => l.orderId === free.id)).toMatchObject({ grossCents: 0, vatCents: 0, netCents: 0 });
   });
 });

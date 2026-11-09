@@ -209,11 +209,6 @@ describe("invoiceMonth", () => {
     expect(invoiceMonth("2026-12").end).toEqual(new Date("2027-01-01T00:00:00.000Z"));
   });
 
-  it("pins current behaviour — suspected bug: a year below 100 means 19xx (0099-10 is October 1999)", () => {
-    expect(invoiceMonth("0099-10").start).toEqual(new Date("1999-10-01T00:00:00.000Z"));
-    expect(invoiceMonth("26-10").start).toEqual(new Date("1926-10-01T00:00:00.000Z"));
-  });
-
   it("accepts a month without the leading zero", () => {
     expect(invoiceMonth("2026-1").start).toEqual(new Date("2026-01-01T00:00:00.000Z"));
   });
@@ -295,12 +290,6 @@ describe("the printable copy", () => {
     expect(txt).toContain("TB-202610-000001    TB-00007  Anna\nKovács             2 ");
   });
 
-  it("pins current behaviour — suspected bug: an amount under €1 is printed one character too far right", () => {
-    const txt = exportOf([row({ tickets_cents: "50" })]).txt;
-    const line = txt.split("\n").find((l) => l.startsWith("TB-202610"))!;
-    // 39 cents net, 11 VAT, 50 gross: each column is 13 characters wide instead of 12
-    expect(line.slice(59)).toBe("         0.39         0.11         0.50");
-  });
 });
 
 describe("the mails", () => {
@@ -323,49 +312,10 @@ describe("the mails", () => {
   });
 });
 
-describe("pinned crashes", () => {
-  it("pins current behaviour — suspected bug: a month with no paid orders throws instead of exporting nothing", () => {
-    expect(() => exportOf([])).toThrow(TypeError);
-  });
-
-  it("pins current behaviour — suspected bug: a €0 order (100% discount) makes the whole export throw", () => {
-    expect(() => exportOf([row({ tickets_cents: "0", discount_cents: "13000" })])).toThrow(RangeError);
-  });
-
-  it("pins current behaviour — suspected bug: a 1 or 2 cent order makes the whole export throw (its VAT rounds to 0, found by the crash hunt)", () => {
-    expect(() => exportOf([row({ tickets_cents: "1" })])).toThrow(RangeError);
-    expect(() => exportOf([row({ tickets_cents: "2" })])).toThrow(RangeError);
-    expect(() => exportOf([row({ tickets_cents: "3" })])).not.toThrow();
-  });
-
-  it("pins current behaviour — suspected bug: a venue named like an Object method (toString, valueOf, …) makes the export throw (found by the crash hunt)", () => {
-    for (const venue of ["toString", "valueOf", "hasOwnProperty", "isPrototypeOf", "propertyIsEnumerable", "toLocaleString", "__defineGetter__"]) {
-      expect(() => exportOf([row({ venue })]), venue).toThrow(TypeError);
-    }
-  });
-
-  it("pins current behaviour — suspected bug: a venue named __proto__ or constructor is invoiced to organizer undefined / Object, with no email", () => {
-    const proto = exportOf([row({ venue: "__proto__" })]);
-    expect(proto.result.organizers[0]).toMatchObject({ organizer: undefined, email: undefined, taxNo: undefined });
-    expect(csvLines(proto.csv)[0]).toContain(",undefined,undefined,");
-    expect(proto.mails[0].to).toBeUndefined();
-    const ctor = exportOf([row({ venue: "constructor" })]);
-    expect(ctor.result.organizers[0]).toMatchObject({ organizer: "Object", email: undefined });
-  });
-
+describe("pinned, not fixed yet", () => {
   it("pins current behaviour — suspected bug: an order with a 0 subtotal gets discount percent NaN (null in the JSON, NaN in the CSV)", () => {
     const r = exportOf([row({ subtotal_cents: "0", discount_cents: "0" })]);
     expect(r.result.organizers[0].lines[0].discountPercent).toBeNaN();
     expect(csvLines(r.csv)[0].split(",")[9]).toBe("NaN");
-  });
-
-  it("pins current behaviour — suspected bug: a month that is not YYYY-MM throws", () => {
-    expect(() => exportOf([row()], "abc")).toThrow(RangeError);
-    expect(() => exportOf([row()], "2026")).toThrow(RangeError);
-  });
-
-  it("pins current behaviour — suspected bug: month 13 silently becomes January of the next year", () => {
-    expect(invoiceMonth("2026-13").start).toEqual(new Date("2027-01-01T00:00:00.000Z"));
-    expect(exportOf([row()], "2026-13").result.month).toBe("2027-01");
   });
 });

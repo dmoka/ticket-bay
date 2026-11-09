@@ -11,7 +11,7 @@
 //     organizer, all with the month's prefix.
 //  4. CSV round trip. Parsing the CSV back (RFC 4180 quoting) gives one record per
 //     line with the line's organizer, customer, event and amounts.
-//  5. Printable copy. For amounts from €1 to below €100,000,000 the amount columns
+//  5. Printable copy. For amounts below €100,000,000 the amount columns
 //     line up: every invoice row and total row is 95 characters, ending in three
 //     12-character right-aligned amounts.
 //  6. Mails. One per organizer, to its email, stating its count and totals.
@@ -42,7 +42,7 @@ function run(rows: InvoiceOrderRow[], m: string, firstSeq: number) {
 const vatOracle = (gross: number) => Number((BigInt(gross) * 27n * 2n + 127n) / 254n);
 const sum = (xs: number[]) => xs.reduce((a, b) => a + b, 0);
 const MAX_ORDER_CENTS = 10_000_000_000_000;
-const capped = fc.oneof(fc.integer({ min: 3, max: 2_000_000 }), fc.integer({ min: 3, max: MAX_ORDER_CENTS }));
+const capped = fc.oneof(fc.integer({ min: 0, max: 200 }), fc.integer({ min: 0, max: 2_000_000 }), fc.integer({ min: 0, max: MAX_ORDER_CENTS }));
 const cappedRow = fc.tuple(invoiceRow, capped, fc.boolean()).map(([r, cents, asString]) => ({ ...r, tickets_cents: asString ? String(cents) : cents }));
 const rowsArb = fc.array(cappedRow, { minLength: 1, maxLength: 15 });
 const firstSeq = fc.integer({ min: 1, max: 999_000 });
@@ -194,11 +194,11 @@ describe("4. CSV round trip", () => {
 });
 
 describe("5. printable copy", () => {
-  it("amounts from €1 to below €100,000,000 line up in three 12-character columns", () => {
-    // VAT of at least €1 needs gross ≥ 571 cents; gross below €100M keeps every amount within 12 characters
+  it("amounts below €100,000,000 line up in three 12-character columns", () => {
+    // gross below €100M keeps every amount within 12 characters
     const printable = cappedRow.map((r) => ({
       ...r,
-      tickets_cents: 571 + (Number(r.tickets_cents) % (10_000_000_000 - 571)),
+      tickets_cents: Number(r.tickets_cents) % 10_000_000_000,
       // a newline in a name breaks the row (pinned in invoice-export.test.ts)
       customer_name: r.customer_name.replace(/[\r\n]/g, " "),
     }));
